@@ -175,14 +175,47 @@ module n20_motor(clearance=0) {
 
 
 // The basic sled shape, used as a building block for multiple parts
-//   - A circle around the pinion shaft that extends join on a segment 
-//     of a greater circle (base_id)
-module sled_shape(h, slice_a = 10) {
-    greater_circle_offset = pinion_dist();
-    cyl(d=25, h=h, anchor=BOTTOM, $fn=128*LOD);
-    
+//   - A circle around the pinion shaft that extends to join on a segment 
+//     of a greater circle (greater_d).
+//   - slice_d is the dia of a common ciricle to whicht the slice angle (slice_a) opertates.
+//     In this way the shape edges match, regadrless of the greader circle size.
+module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
+    greater_d = is_def(greater_d) ? greater_d : slice_d;
+    r = 30/2;
+    c = [0, pinion_dist()]; // origin, in the sled frame
 
+    // far points along each side, s = -1 left, 1 right
+    far = [for (s = [-1, 1]) let(
+                p = c + slice_d/2 * [sin(s*slice_a/2), -cos(s*slice_a/2)],
+                l = norm(p),
+                phi = atan2(p.y, p.x),
+                t = r * [cos(phi + s*acos(r/l)), sin(phi + s*acos(r/l))] // tangent point
+           ) t + (p - t) * 10];
+    assert(far[1].x > far[0].x, "sled_shape: slice_a too small, sides must flare out from the shaft circle");
+
+    linear_extrude(h)
+    difference() {
+        intersection() {
+            hull() {
+                circle(r=r, $fn=128*LOD);
+                polygon([far[0], far[1], [0, 0]]);
+            }
+            translate(c) circle(d=greater_d, $fn=512*LOD);
+        }
+        if (is_def(pinion_hole_d))
+            circle(d=pinion_hole_d, $fn=64*LOD);
+    }
 }
+
+//stack some sled_shape() of differen outer circles sise on top of each other to check alignments.
+module sled_demo() {
+    sizes = [base_id - 10, base_id, base_id + 10, base_id + 20];
+    for (i = idx(sizes))
+        up(i * 2)
+        color(["red", "green", "blue", "orange"][i])
+        sled_shape(2, pinion_hole_d=n20_shaft.x, greater_d=sizes[len(sizes) - 1 - i]);
+}
+
 
 module sled_assembly(pionion_r=0) {
     down(3)
@@ -191,6 +224,9 @@ module sled_assembly(pionion_r=0) {
     
     down(3)
     sled_shape(3);
+    
+    up(10)
+    sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
 }
 
 
@@ -198,7 +234,7 @@ part = 0;
 
 // full assembly
 if(part == 0) {
-    base();
+    # base();
     up(base_h)
     collar();
 
