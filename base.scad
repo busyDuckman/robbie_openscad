@@ -1,0 +1,230 @@
+include <BOSL2/std.scad>
+include <BOSL2/gears.scad>
+include <NopSCADlib/vitamins/stepper_motors.scad>
+include <NopSCADlib/vitamins/extrusions.scad>
+include <screw_holes.scad>
+
+/*
+Vocab:
+  base: tube on which robbie sits
+  collar: the colar with an internal ring gear and channel for the sleds
+*/
+
+LOD = 1.0; //0.25;
+
+base_od = 150;
+base_id = 100;
+base_cable_dia = 12;
+base_h = 40;
+
+collar_h = 10;
+collar_gear_h = 8;
+
+// gears
+gear_mod=1.5;
+ring_gear_teeth = 56;
+pinion_teeth = 9;
+// < 17 teeth needs profile shift to avoid undercut; ring must use the same shift
+pinion_shift = auto_profile_shift(teeth=pinion_teeth);
+pinion_shaft_d = 3; // n20 shaft
+
+
+//parts
+magnet_d = 5.98; //ie should fit a 6mm hole
+magnet_h = 2.5; //ie should fit a 6mm hole
+magnet_offset = 1.0; // adjust to soud magnet strength
+
+
+// printer tolerances
+backlash=0.1;
+
+// self tapping screws
+my_screw = SCREW_UNIT_UK_GAUGE_NARROW + SCREW_HEAD_COUNTERSUNK + SCREW_FOR_METAL;
+my_screw_no_head = SCREW_UNIT_UK_GAUGE_NARROW + SCREW_FOR_METAL;
+my_screw_gauge=6;
+    
+function half_way(a, b) = (a + b) / 2;
+
+function collar_od() = half_way(base_od, base_id);
+function collar_holes_r() = 110/2; //half_way(collar_od(), base_id) / 2;
+
+module base() {
+    chamf = (collar_od() - base_id)/2;
+    
+    color("gray")
+    
+    render()
+    difference() {
+        tube(id=base_id, od=base_od, h=base_h , ochamfer2=chamf, anchor=BOTTOM, $fn=512*LOD);
+        
+        xcyl(h=base_od/1.9, d=base_cable_dia, $fn=64*LOD, anchor=RIGHT);
+        
+        up(base_h)
+        zrot_copies(n=8, r=collar_holes_r())
+        self_tap_hole(gauge=my_screw_gauge, length=25, screw_type=my_screw_no_head,
+                  hole_type=HOLE_TRI_TWIST, anchor=TOP, sink=0.5);
+    }
+    
+    
+
+
+}
+
+module collar() {
+    color("blue")
+    render()
+    difference() {
+        union() {
+            tube(id=base_id, od=collar_od(), h=collar_h, anchor=BOTTOM, $fn=512);
+            
+            //outer collar
+            tube(id=collar_od()-6, od=collar_od(), h=collar_h+3, anchor=BOTTOM, $fn=512);
+            
+            // inner collar
+            tube(id=collar_od()-32, od=base_id, h=collar_h+3, chamfer=0.5, anchor=BOTTOM, $fn=512);
+            
+            ring_gear(mod=gear_mod, teeth=ring_gear_teeth , thickness=collar_gear_h, backing=10, profile_shift=pinion_shift,
+                backlash=backlash, anchor=BOTTOM, $fn=512*LOD);
+        }
+    
+        up(collar_h)
+        zrot_copies(n=8, r=collar_holes_r())
+            self_tap_hole(gauge=my_screw_gauge, length=25, screw_type=my_screw,
+                  hole_type=HOLE_CLEARANCE, anchor=TOP, sink=5);
+          //cyl(h=20, d=6, $fn=64*LOD, anchor=BOTTOM);
+    }
+          
+}
+
+// distance from the origin to pinion centre
+function pinion_dist() = gear_dist(mod=gear_mod, teeth1=pinion_teeth, teeth2=ring_gear_teeth,
+                                   profile_shift1=pinion_shift, profile_shift2=pinion_shift, internal2=true);
+
+// pinion centre when it has travelled `angle` degrees around the ring (0 = -Y)
+function pinion_pos(angle) = zrot(angle, p=[0, -pinion_dist(), 0]);
+
+// pinion's spin relative to the at_pinion() frame so its teeth stay meshed at `angle`
+// (half a tooth extra when the tooth counts have different parity)
+function pinion_spin(angle) = -angle * ring_gear_teeth / pinion_teeth
+                            + ((pinion_teeth + ring_gear_teeth) % 2) * 180 / pinion_teeth;
+
+// move children to the pinion position, turning with the orbit (sled frame, +Y faces collar centre)
+module at_pinion(angle) {
+    zrot(angle) fwd(pinion_dist()) children();
+}
+
+module pinion(gear_spin=0) {
+    collar_od = magnet_d+4;
+    
+    color("orange")
+    union() {
+        up(collar_gear_h)
+        //cyl(d=collar_od, h=magnet_offset, anchor=BOTTOM, $fn=128*LOD);
+        tube(id=magnet_d-2, od=collar_od, h=magnet_offset, ochamfer1=-0.5, 
+             anchor=BOTTOM, $fn=128*LOD);
+        
+    
+        up(collar_gear_h+magnet_offset)
+        tube(id=magnet_d, od=collar_od, h=magnet_h, ochamfer2=0.25, 
+             anchor=BOTTOM, $fn=128*LOD);
+    
+        spur_gear(mod=gear_mod, teeth=pinion_teeth, thickness=collar_gear_h, 
+                profile_shift=pinion_shift, backlash=backlash, 
+                shaft_diam=pinion_shaft_d, gear_spin=gear_spin, 
+                anchor=BOTTOM, $fn=128*LOD);
+    }
+}
+
+// pinion meshed with the collar's ring gear at `angle`
+module pinion_at(angle) {
+    at_pinion(angle) {
+        pinion(gear_spin=pinion_spin(angle));
+    }
+}
+
+// GA12-N20 gear motor stand-in, sizes from seller drawing
+// origin at gearbox front face, shaft along +Z, body below (so at_pinion(a) n20_motor() works)
+n20_box = [12, 10, 9];      // gearbox width, height, length
+n20_can = [12, 10, 15.2];   // can diameter, across flats, length (incl. end cap)
+n20_shaft = [3, 2.5, 10];   // diameter, across flat, length (length not on drawing, measure)
+
+// clearance grows the gearbox and can (not the shaft) for use as a cutter
+module n20_motor(clearance=0) {
+    c = clearance;
+
+    // gearbox, solid for csg
+    color("gold")
+    cuboid([n20_box.x + 2*c, n20_box.y + 2*c, n20_box.z], rounding=0.5 + c, edges="Z", anchor=TOP, $fn=16*LOD);
+
+    // can, round with two flats
+    color("silver")
+    down(n20_box.z)
+    intersection() {
+        cyl(d=n20_can.x + 2*c, h=n20_can.z, anchor=TOP, $fn=64*LOD);
+        cuboid([n20_can.x + 2*c, n20_can.y + 2*c, n20_can.z], anchor=TOP);
+    }
+
+    // D shaft, flat on +Y
+    color("lightgray")
+    intersection() {
+        cyl(d=n20_shaft.x, h=n20_shaft.z, anchor=BOTTOM, $fn=64*LOD);
+        fwd((n20_shaft.x - n20_shaft.y)/2)
+        cuboid([n20_shaft.x, n20_shaft.y, n20_shaft.z], anchor=BOTTOM);
+    }
+}
+
+
+// The basic sled shape, used as a building block for multiple parts
+//   - A circle around the pinion shaft that extends join on a segment 
+//     of a greater circle (base_id)
+module sled_shape(h, slice_a = 10) {
+    greater_circle_offset = pinion_dist();
+    cyl(d=25, h=h, anchor=BOTTOM, $fn=128*LOD);
+    
+
+}
+
+module sled_assembly(pionion_r=0) {
+    down(3)
+        n20_motor();
+    pinion(gear_spin=pionion_r);
+    
+    down(3)
+    sled_shape(3);
+}
+
+
+part = 0;
+
+// full assembly
+if(part == 0) {
+    base();
+    up(base_h)
+    collar();
+
+    up(base_h)
+    for(angle = [0, 120, 240]) {
+        at_pinion(angle)
+            sled_assembly(pionion_r=pinion_spin(angle));
+        // pinion_at(angle);
+    }
+}
+
+if(part == 1) {
+    base();
+}
+
+if(part == 2) {
+    collar();
+}
+
+if(part == 4) {
+    sled_assembly();
+}
+
+
+
+
+
+
+
