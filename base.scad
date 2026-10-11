@@ -3,6 +3,7 @@ include <BOSL2/gears.scad>
 include <NopSCADlib/vitamins/stepper_motors.scad>
 include <NopSCADlib/vitamins/extrusions.scad>
 include <screw_holes.scad>
+include <components.scad>
 
 /*
 Vocab:
@@ -26,7 +27,7 @@ ring_gear_teeth = 56;
 pinion_teeth = 9;
 // < 17 teeth needs profile shift to avoid undercut; ring must use the same shift
 pinion_shift = auto_profile_shift(teeth=pinion_teeth);
-pinion_shaft_d = 3; // n20 shaft
+pinion_shaft_fit = 0.0; // added to the n20 D hole, 0 = nominal (press fit on X1C 0.2 nozzle), + looser, - tighter
 
 
 //parts
@@ -128,11 +129,31 @@ module pinion(gear_spin=0) {
         tube(id=magnet_d, od=collar_od, h=magnet_h, ochamfer2=0.25, 
              anchor=BOTTOM, $fn=128*LOD);
     
-        spur_gear(mod=gear_mod, teeth=pinion_teeth, thickness=collar_gear_h, 
-                profile_shift=pinion_shift, backlash=backlash, 
-                shaft_diam=pinion_shaft_d, gear_spin=gear_spin, 
-                anchor=BOTTOM, $fn=128*LOD);
+        difference() {
+            spur_gear(mod=gear_mod, teeth=pinion_teeth, thickness=collar_gear_h,
+                    profile_shift=pinion_shift, backlash=backlash,
+                    gear_spin=gear_spin, anchor=BOTTOM, $fn=128*LOD);
+
+            zrot(gear_spin)
+            pinion_shaft_hole(collar_gear_h);
+        }
     }
+}
+
+// D hole for the n20 shaft, from z=0 up, with a small lead-in chamfer at the bottom
+module pinion_shaft_hole(h) {
+    d = n20_shaft.x + pinion_shaft_fit;
+    flat = n20_shaft.y + pinion_shaft_fit;
+
+    down(0.01)
+    intersection() {
+        cyl(d=d, h=h + 0.02, anchor=BOTTOM, $fn=64);
+        fwd((d - flat)/2)
+        cuboid([d, flat, h + 0.02], anchor=BOTTOM);
+    }
+
+    down(0.01)
+    cyl(d1=d + 0.6, d2=d, h=0.3, anchor=BOTTOM, $fn=64);
 }
 
 // pinion meshed with the collar's ring gear at `angle`
@@ -142,38 +163,6 @@ module pinion_at(angle) {
     }
 }
 
-// GA12-N20 gear motor stand-in, sizes from seller drawing
-// origin at gearbox front face, shaft along +Z, body below (so at_pinion(a) n20_motor() works)
-n20_box = [12, 10, 9];      // gearbox width, height, length
-n20_can = [12, 10, 15.2];   // can diameter, across flats, length (incl. end cap)
-n20_shaft = [3, 2.5, 10];   // diameter, across flat, length (length not on drawing, measure)
-
-// clearance grows the gearbox and can (not the shaft) for use as a cutter
-module n20_motor(clearance=0) {
-    c = clearance;
-
-    // gearbox, solid for csg
-    color("gold")
-    cuboid([n20_box.x + 2*c, n20_box.y + 2*c, n20_box.z], rounding=0.5 + c, edges="Z", anchor=TOP, $fn=16*LOD);
-
-    // can, round with two flats
-    color("silver")
-    down(n20_box.z)
-    intersection() {
-        cyl(d=n20_can.x + 2*c, h=n20_can.z, anchor=TOP, $fn=64*LOD);
-        cuboid([n20_can.x + 2*c, n20_can.y + 2*c, n20_can.z], anchor=TOP);
-    }
-
-    // D shaft, flat on +Y
-    color("lightgray")
-    intersection() {
-        cyl(d=n20_shaft.x, h=n20_shaft.z, anchor=BOTTOM, $fn=64*LOD);
-        fwd((n20_shaft.x - n20_shaft.y)/2)
-        cuboid([n20_shaft.x, n20_shaft.y, n20_shaft.z], anchor=BOTTOM);
-    }
-}
-
-
 // The basic sled shape, used as a building block for multiple parts
 //   - A circle around the pinion shaft that extends to join on a segment 
 //     of a greater circle (greater_d).
@@ -181,7 +170,7 @@ module n20_motor(clearance=0) {
 //     In this way the shape edges match, regadrless of the greader circle size.
 module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
     greater_d = is_def(greater_d) ? greater_d : slice_d;
-    r = 30/2;
+    r = 33/2;
     c = [0, pinion_dist()]; // origin, in the sled frame
 
     // far points along each side, s = -1 left, 1 right
@@ -225,8 +214,15 @@ module sled_assembly(pionion_r=0) {
     down(3)
     sled_shape(3);
     
+    /*
     up(10)
     sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
+    
+    up(20)
+    yrot(180)
+    //zrot(45)
+    as5600_board(headers=BOTTOM);
+    */
 }
 
 
@@ -237,6 +233,8 @@ if(part == 0) {
     # base();
     up(base_h)
     collar();
+    
+    
 
     up(base_h)
     for(angle = [0, 120, 240]) {

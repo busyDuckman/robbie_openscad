@@ -1,0 +1,145 @@
+include <BOSL2/std.scad>
+
+/*
+Stand-ins for bought parts, accurate enough to model mounts around.
+Use include <components.scad> so the size variables come through.
+*/
+
+
+// GA12-N20 gear motor stand-in, sizes from seller drawing
+// origin at gearbox front face, shaft along +Z, body below (so at_pinion(a) n20_motor() works)
+n20_box = [12, 10, 9];      // gearbox width, height, length
+n20_can = [12, 10, 15.2];   // can diameter, across flats, length (incl. end cap)
+n20_shaft = [3, 2.5, 10];   // diameter, across flat, length (length not on drawing, measure)
+
+// clearance grows the gearbox and can (not the shaft) for use as a cutter
+module n20_motor(clearance=0) {
+    c = clearance;
+
+    // gearbox, solid for csg
+    color("gold")
+    cuboid([n20_box.x + 2*c, n20_box.y + 2*c, n20_box.z], rounding=0.5 + c, edges="Z", anchor=TOP, $fn=16);
+
+    // can, round with two flats
+    color("silver")
+    down(n20_box.z)
+    intersection() {
+        cyl(d=n20_can.x + 2*c, h=n20_can.z, anchor=TOP, $fn=64);
+        cuboid([n20_can.x + 2*c, n20_can.y + 2*c, n20_can.z], anchor=TOP);
+    }
+
+    // D shaft, flat on +Y
+    color("lightgray")
+    intersection() {
+        cyl(d=n20_shaft.x, h=n20_shaft.z, anchor=BOTTOM, $fn=64);
+        fwd((n20_shaft.x - n20_shaft.y)/2)
+        cuboid([n20_shaft.x, n20_shaft.y, n20_shaft.z], anchor=BOTTOM);
+    }
+}
+
+
+// ultra-miniature lever snap switch stand-in (Omron D2F-L size, the mouse-button type)
+// origin at body centre of the terminal face, plunger face up (+Z), lever hinged at -X, tip at +X
+d2f_body = [12.8, 5.8, 6.5];   // length, thickness, height to the plunger face
+d2f_lever = [12.5, 3, 0.3];    // length, width, thickness (measure)
+d2f_lever_free_h = 10;         // lever tip height above the terminal face when free
+d2f_lever_op_h = 6.8;          // lever tip height when it clicks (datasheet +-1.5, measure)
+d2f_pin = [0.6, 3.5];          // terminal blade thickness, length
+d2f_pin_pitch = 5.08;
+d2f_hole_d = 2;                // mounting holes through the thickness (datasheet, measure)
+d2f_hole_spacing = 6.5;        // centred along the length (measure)
+d2f_hole_z = 2.9;              // hole centre above the terminal face (not on datasheet, measure)
+
+// children at each mounting hole centre, run them along Y to go through the body
+module d2f_hole_positions() {
+    up(d2f_hole_z)
+    xcopies(spacing=d2f_hole_spacing, n=2)
+    children();
+}
+
+// clearance grows the body (not the lever or pins) for use as a cutter
+module d2f_switch(clearance=0) {
+    c = clearance;
+
+    color("#222")
+    difference() {
+        cuboid([d2f_body.x + 2*c, d2f_body.y + 2*c, d2f_body.z + 2*c], anchor=BOTTOM, $fn=16);
+        if (c == 0)
+            d2f_hole_positions() ycyl(d=d2f_hole_d, h=2*d2f_body.y, $fn=24);
+    }
+
+    // lever, from the hinge end up to the free tip
+    lever_rise = d2f_lever_free_h - d2f_body.z - 0.5;
+    color("silver")
+    translate([-d2f_body.x/2 + 0.5, 0, d2f_body.z + 0.5])
+    yrot(-atan(lever_rise / d2f_lever.x))
+    cuboid(d2f_lever, anchor=BOTTOM+LEFT);
+
+    color("gold")
+    xcopies(spacing=d2f_pin_pitch, n=3)
+    cuboid([3, d2f_pin.x, d2f_pin.y], anchor=TOP);
+}
+
+
+// AS5600 magnetic encoder board stand-in (the cheap 23mm square ones)
+// origin at board centre, pcb bottom at z=0, chip on top (+Z)
+// flip with yrot(180) to face the chip down onto a magnet
+as5600_pcb = [23, 23, 1.6];    // width, depth, thickness (thickness not on listing, measure)
+as5600_hole_d = 3;             // corner holes (measured)
+as5600_hole_inset = (23 - 15) / 2;  // holes 15mm apart centre to centre (measured)
+as5600_chip = [3.9, 4.9, 1.5]; // SOIC-8 body, legs along x
+as5600_chip_leads = 6.0;       // SOIC-8 width across the leads
+as5600_header_x = 7.62;        // header columns at +-x from centre (measure), 3 pins at -x, 4 at +x
+header_pitch = 2.54;
+header_body_h = 2.5;           // plastic spacer
+header_pin = [0.64, 6, 3];     // square size, length past the spacer, tail into the pcb
+
+// height of the chip's top face above the pcb bottom, for setting the magnet gap
+function as5600_chip_top() = as5600_pcb.z + as5600_chip.z;
+
+module as5600_hole_positions() {
+    s = as5600_pcb.x/2 - as5600_hole_inset;
+    for (x = [-s, s], y = [-s, s])
+        translate([x, y, 0]) children();
+}
+
+// one straight header strip of n pins along Y, spacer bottom at z=0, pins up
+module header_strip(n) {
+    color("#222")
+    cuboid([header_pitch, n*header_pitch, header_body_h], chamfer=0.2, edges="Z", anchor=BOTTOM);
+
+    color("gold")
+    ycopies(spacing=header_pitch, n=n)
+    down(header_pin.z)
+    cuboid([header_pin.x, header_pin.x, header_pin.z + header_body_h + header_pin.y], anchor=BOTTOM);
+}
+
+// clearance grows the pcb outline (not the holes or chip) for use as a cutter
+// headers: undef for none, TOP for spacer on the chip side, BOTTOM for spacer on the back
+module as5600_board(clearance=0, headers) {
+    c = clearance;
+
+    color("white")
+    difference() {
+        cuboid([as5600_pcb.x + 2*c, as5600_pcb.y + 2*c, as5600_pcb.z], rounding=1 + c, edges="Z", anchor=BOTTOM, $fn=16);
+        as5600_hole_positions()
+            cyl(d=as5600_hole_d, h=3*as5600_pcb.z, $fn=32);
+    }
+
+    // chip, legs along the long sides
+    up(as5600_pcb.z) {
+        color("lightgray")
+        cuboid([as5600_chip_leads, as5600_chip.y - 1, 0.3], anchor=BOTTOM);
+
+        color("#222")
+        cuboid(as5600_chip, anchor=BOTTOM);
+    }
+
+    if (headers == TOP)
+        for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
+            translate([h[0], 0, as5600_pcb.z]) header_strip(h[1]);
+
+    if (headers == BOTTOM)
+        for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
+            translate([h[0], 0, 0]) zflip() header_strip(h[1]);
+}
