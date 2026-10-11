@@ -56,6 +56,17 @@ function collar_holes_r() = 110/2; //half_way(collar_od(), base_id) / 2;
 upper_sled_z = 10; // upper sled bottom above the collar bottom
 sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
 sensor_fit = 0.2;  // pocket clearance around the pcb
+sensor_standoff = 2.5; // stilt height, wire room between the pocket floor and the chip-side face
+sensor_peg_fit = 0.1;  // stilt pegs in the pcb holes, on the diameter
+
+guard_t = 1.0;     // magnet guard wall
+guard_gap = 0.5;   // guard top below the chip-side face, clears smd parts
+guard_id = 10;     // matches the pinion hole in the upper sled
+
+wire_d = 1.2;      // wire od (28 AWG silicone)
+wire_n = 4;        // vcc, gnd, sda, scl
+wire_channel = [wire_n*wire_d + 1, wire_d + 1]; // width, depth of the drop channel
+wire_channel_shift = 2; // move the channel off the fairing wall towards the pinion, a conduit fills the gap
 
 
 fairing_t = 1.6;   // wall thickness
@@ -229,12 +240,56 @@ module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
 function magnet_top() = collar_gear_h + magnet_offset + magnet_h;
 function sensor_z() = magnet_top() + sensor_gap + as5600_chip_top(); // pcb back face, board is chip down
 
+function sensor_floor_z() = sensor_z() - as5600_pcb.z - sensor_standoff; // pocket floor
+
+// wire channel centre in y, inside the fairing's innermost wall (+Y, sled r = 33/2), moved towards the pinion
+function wire_channel_y() = 33/2 - fairing_t/2 - wire_channel.y/2 - wire_channel_shift;
+
+// conduit around the channel, from the lower sled up to the plate, joined to the fairing wall behind it
+module wire_conduit() {
+    front_y = wire_channel_y() - wire_channel.y/2 - fairing_t;
+    assert(front_y > outer_radius(mod=gear_mod, teeth=pinion_teeth, profile_shift=pinion_shift) + 0.5,
+           "wire_conduit: wire_channel_shift too big, conduit hits the pinion");
+
+    linear_extrude(upper_sled_z)
+    intersection() {
+        sled_profile();
+        back(front_y) rect([wire_channel.x + 2*fairing_t, 20], anchor=FRONT);
+    }
+}
+
 // as5600 board chip down over the magnet
 module sensor() {
     up(sensor_z())
     yrot(180)
     //as5600_board(headers=BOTTOM, right_angle=true);
     as5600_board();
+}
+
+// stilts from the pocket floor up to the chip-side face, pegs locate in the pcb holes
+module sensor_stilts() {
+    up(sensor_floor_z())
+    as5600_hole_positions() {
+        cyl(d=4.5, h=sensor_standoff + 0.01, anchor=BOTTOM, $fn=24);
+        up(sensor_standoff)
+        cyl(d=as5600_hole_d - sensor_peg_fit, h=as5600_pcb.z - 0.2, chamfer2=0.3, anchor=BOTTOM, $fn=24);
+    }
+}
+
+// ring around the magnet from the pocket floor up to just under the board, keeps wires out of the gap
+module sensor_guard() {
+    up(sensor_floor_z())
+    tube(id=guard_id, od=guard_id + 2*guard_t, h=sensor_standoff - guard_gap, anchor=BOTTOM, $fn=64*LOD);
+}
+
+// wires dropped straight down the channel, from the pocket floor to below the motor
+module sensor_wires() {
+    top = sensor_floor_z() + wire_d/2;
+    bottom = -3 - n20_box.z - n20_can.z;
+    for (i = [0 : wire_n - 1])
+        color(["red", "black", "yellow", "green", "blue", "white"][i % 6])
+        translate([(i - (wire_n - 1)/2) * wire_d, wire_channel_y(), bottom])
+        cyl(d=wire_d, h=top - bottom, anchor=BOTTOM, $fn=12);
 }
 
 
@@ -269,18 +324,38 @@ module upper_sled(pionion_r=0) {
             sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
             at_sled_holes()
                 cyl(d=6, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
-            down(upper_sled_z)
+            down(upper_sled_z) {
                 fairing();
+                wire_conduit();
+                sensor_stilts();
+                sensor_guard();
+            }
         }
 
         // ring is centred on the collar centre, which is +Y pinion_dist() in the sled frame
         back(pinion_dist()) down(upper_sled_z)
         inner_collar_ring(e=0.1);
 
-        // pcb pocket, open at the top
-        up(sensor_z() - as5600_pcb.z - upper_sled_z)
-        cuboid([as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit, 20],
-               rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+        // pcb pocket, open at the top, floor low enough for wires under the board
+        difference() {
+            up(sensor_floor_z() - upper_sled_z)
+            cuboid([as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit, 20],
+                   rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+            down(upper_sled_z) {
+                sensor_stilts();
+                sensor_guard();
+            }
+        }
+
+        // wire drop: from the pocket floor through the plate and down the inside of the fairing's inner wall
+        translate([0, wire_channel_y(), -upper_sled_z - 0.1])
+        cuboid([wire_channel.x, wire_channel.y, sensor_floor_z() + 0.2], anchor=BOTTOM);
+
+        // and across the plate from the pocket to the channel
+        translate([0, wire_channel_y() + wire_channel.y/2, -0.1])
+        cuboid([wire_channel.x, wire_channel_y() + wire_channel.y/2 - as5600_pcb.y/2 + 2,
+                sensor_floor_z() - upper_sled_z + 0.2],
+               anchor=BOTTOM+BACK);
                
         up(2)
         at_sled_holes()
@@ -294,6 +369,11 @@ module lower_sled(pionion_r=0) {
     render()
     difference() {
         sled_shape(3);
+
+        // wire drop, under the fairing channel
+        back(wire_channel_y())
+        cuboid([wire_channel.x, wire_channel.y, 10]);
+
         at_sled_holes()
             yrot(180)
                 self_tap_hole(gauge=4, length=18, screw_type=my_screw,
@@ -306,15 +386,15 @@ module sled_assembly(pionion_r=0) {
         n20_motor();
     pinion(gear_spin=pionion_r);
     
-    down(3)
-    lower_sled();
+    //down(3)
+    //lower_sled();
     
     
     up(upper_sled_z)
-    upper_sled(pionion_r);
+    # upper_sled(pionion_r);
     
     sensor();
-    
+    sensor_wires();
 }
 
 
