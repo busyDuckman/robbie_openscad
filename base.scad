@@ -11,6 +11,10 @@ Vocab:
   collar: the colar with an internal ring gear and channel for the sleds
 */
 
+// ----------------------------------------------------------------------------------------
+// Globals
+// ----------------------------------------------------------------------------------------
+
 LOD = 1.0; //0.25;
 
 base_od = 150;
@@ -48,6 +52,20 @@ function half_way(a, b) = (a + b) / 2;
 
 function collar_od() = half_way(base_od, base_id);
 function collar_holes_r() = 110/2; //half_way(collar_od(), base_id) / 2;
+
+upper_sled_z = 10; // upper sled bottom above the collar bottom
+sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
+sensor_fit = 0.2;  // pocket clearance around the pcb
+
+
+fairing_t = 1.6;   // wall thickness
+fairing_fit = 1.0; // clearance to the ring gear tips
+
+
+// ----------------------------------------------------------------------------------------
+// Geometry
+// ----------------------------------------------------------------------------------------
+
 
 module base() {
     chamf = (collar_od() - base_id)/2;
@@ -175,6 +193,12 @@ module pinion_at(angle) {
 //   - slice_d is the dia of a common ciricle to whicht the slice angle (slice_a) opertates.
 //     In this way the shape edges match, regadrless of the greader circle size.
 module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
+    linear_extrude(h)
+    sled_profile(pinion_hole_d, slice_a, slice_d, greater_d);
+}
+
+// 2D outline of sled_shape()
+module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
     greater_d = is_def(greater_d) ? greater_d : slice_d;
     r = 33/2;
     c = [0, pinion_dist()]; // origin, in the sled frame
@@ -188,7 +212,6 @@ module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) 
            ) t + (p - t) * 10];
     assert(far[1].x > far[0].x, "sled_shape: slice_a too small, sides must flare out from the shaft circle");
 
-    linear_extrude(h)
     difference() {
         intersection() {
             hull() {
@@ -202,10 +225,6 @@ module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) 
     }
 }
 
-upper_sled_z = 10; // upper sled bottom above the collar bottom
-sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
-sensor_fit = 0.2;  // pocket clearance around the pcb
-
 // heights in the sled frame (z=0 at the collar bottom)
 function magnet_top() = collar_gear_h + magnet_offset + magnet_h;
 function sensor_z() = magnet_top() + sensor_gap + as5600_chip_top(); // pcb back face, board is chip down
@@ -216,6 +235,24 @@ module sensor() {
     yrot(180)
     //as5600_board(headers=BOTTOM, right_angle=true);
     as5600_board();
+}
+
+
+
+// ring gear tooth tips, from the collar centre (internal teeth: addendum reduced by the shift)
+function ring_tip_r() = pitch_radius(mod=gear_mod, teeth=ring_gear_teeth) - gear_mod * (1 - pinion_shift);
+
+// wall following the sled's outer profile, from the lower sled top (z=0) up to the upper sled,
+// trimmed back where the ring gear passes
+module fairing() {
+    linear_extrude(upper_sled_z)
+    intersection() {
+        difference() {
+            sled_profile();
+            offset(r=-fairing_t) sled_profile();
+        }
+        back(pinion_dist()) circle(r=ring_tip_r() - fairing_fit, $fn=256*LOD);
+    }
 }
 
 // position at the bolr holes
@@ -232,6 +269,8 @@ module upper_sled(pionion_r=0) {
             sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
             at_sled_holes()
                 cyl(d=6, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
+            down(upper_sled_z)
+                fairing();
         }
 
         // ring is centred on the collar centre, which is +Y pinion_dist() in the sled frame
@@ -279,13 +318,18 @@ module sled_assembly(pionion_r=0) {
 }
 
 
+// ----------------------------------------------------------------------------------------
+// Render
+// ----------------------------------------------------------------------------------------
+
+
 part = 0;
 
 // full assembly
 if(part == 0) {
-    # base();
-    up(base_h)
-    collar();
+    //base();
+    //up(base_h)
+    //collar();
     
     
 
