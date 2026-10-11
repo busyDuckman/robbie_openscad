@@ -86,13 +86,14 @@ module d2f_switch(clearance=0) {
 // flip with yrot(180) to face the chip down onto a magnet
 as5600_pcb = [23, 23, 1.6];    // width, depth, thickness (thickness not on listing, measure)
 as5600_hole_d = 3;             // corner holes (measured)
-as5600_hole_inset = (23 - 15) / 2;  // holes 15mm apart centre to centre (measured)
+as5600_hole_inset = (23 - 16) / 2;  // holes 15mm apart centre to centre (measured)
 as5600_chip = [3.9, 4.9, 1.5]; // SOIC-8 body, legs along x
 as5600_chip_leads = 6.0;       // SOIC-8 width across the leads
 as5600_header_x = 7.62;        // header columns at +-x from centre (measure), 3 pins at -x, 4 at +x
 header_pitch = 2.54;
 header_body_h = 2.5;           // plastic spacer
 header_pin = [0.64, 6, 3];     // square size, length past the spacer, tail into the pcb
+header_via = [1.0, 1.7];       // plated hole, pad diameter
 
 // height of the chip's top face above the pcb bottom, for setting the magnet gap
 function as5600_chip_top() = as5600_pcb.z + as5600_chip.z;
@@ -103,20 +104,46 @@ module as5600_hole_positions() {
         translate([x, y, 0]) children();
 }
 
-// one straight header strip of n pins along Y, spacer bottom at z=0, pins up
-module header_strip(n) {
-    color("#222")
-    cuboid([header_pitch, n*header_pitch, header_body_h], chamfer=0.2, edges="Z", anchor=BOTTOM);
+// children at each header through hole, z=0 at pcb bottom (3 at -x, 4 at +x)
+module as5600_via_positions() {
+    for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
+        right(h[0]) ycopies(spacing=header_pitch, n=h[1]) children();
+}
 
-    color("gold")
-    ycopies(spacing=header_pitch, n=n)
-    down(header_pin.z)
-    cuboid([header_pin.x, header_pin.x, header_pin.z + header_body_h + header_pin.y], anchor=BOTTOM);
+// one header strip of n pins along Y, pcb surface at z=0
+// straight: spacer on the pcb, pins up
+// right_angle: pins bend at half a pitch up and run out along +X through a spacer lying beside the bend
+module header_strip(n, right_angle=false) {
+    if (!right_angle) {
+        color("#222")
+        cuboid([header_pitch, n*header_pitch, header_body_h], chamfer=0.2, edges="Z", anchor=BOTTOM);
+
+        color("gold")
+        ycopies(spacing=header_pitch, n=n)
+        down(header_pin.z)
+        cuboid([header_pin.x, header_pin.x, header_pin.z + header_body_h + header_pin.y], anchor=BOTTOM);
+    } else {
+        bend_z = header_pitch/2;
+
+        color("#222")
+        right(header_pitch/2)
+        cuboid([header_body_h, n*header_pitch, header_pitch], chamfer=0.2, edges="X", anchor=BOTTOM+LEFT);
+
+        color("gold")
+        ycopies(spacing=header_pitch, n=n) {
+            down(header_pin.z)
+            cuboid([header_pin.x, header_pin.x, header_pin.z + bend_z + header_pin.x/2], anchor=BOTTOM);
+
+            translate([-header_pin.x/2, 0, bend_z])
+            cuboid([header_pin.x + header_pitch/2 + header_body_h + header_pin.y, header_pin.x, header_pin.x], anchor=LEFT);
+        }
+    }
 }
 
 // clearance grows the pcb outline (not the holes or chip) for use as a cutter
 // headers: undef for none, TOP for spacer on the chip side, BOTTOM for spacer on the back
-module as5600_board(clearance=0, headers) {
+// right_angle: headers bend 90 deg and point out past the board edges (+-X)
+module as5600_board(clearance=0, headers, right_angle=false) {
     c = clearance;
 
     color("white")
@@ -124,7 +151,20 @@ module as5600_board(clearance=0, headers) {
         cuboid([as5600_pcb.x + 2*c, as5600_pcb.y + 2*c, as5600_pcb.z], rounding=1 + c, edges="Z", anchor=BOTTOM, $fn=16);
         as5600_hole_positions()
             cyl(d=as5600_hole_d, h=3*as5600_pcb.z, $fn=32);
+        if (c == 0)
+            as5600_via_positions()
+                cyl(d=header_via.x, h=3*as5600_pcb.z, $fn=16);
     }
+
+    // header pads, both faces
+    if (c == 0)
+        color("gold")
+        as5600_via_positions()
+        down(0.05)
+        difference() {
+            cyl(d=header_via.y, h=as5600_pcb.z + 0.1, anchor=BOTTOM, $fn=24);
+            cyl(d=header_via.x, h=3*as5600_pcb.z, $fn=16);
+        }
 
     // chip, legs along the long sides
     up(as5600_pcb.z) {
@@ -135,11 +175,12 @@ module as5600_board(clearance=0, headers) {
         cuboid(as5600_chip, anchor=BOTTOM);
     }
 
+    // mirror the -x column so right angle pins point outward
     if (headers == TOP)
         for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
-            translate([h[0], 0, as5600_pcb.z]) header_strip(h[1]);
+            translate([h[0], 0, as5600_pcb.z]) mirror([h[0] < 0 ? 1 : 0, 0, 0]) header_strip(h[1], right_angle);
 
     if (headers == BOTTOM)
         for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
-            translate([h[0], 0, 0]) zflip() header_strip(h[1]);
+            translate([h[0], 0, 0]) zflip() mirror([h[0] < 0 ? 1 : 0, 0, 0]) header_strip(h[1], right_angle);
 }

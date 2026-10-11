@@ -362,7 +362,7 @@ module bridge() {
 
             // rests for the back of the board, with pegs that locate in its mounting holes
             as5600_hole_positions() {
-                cyl(d=as5600_hole_d + 0.6, h=standoff_h, anchor=TOP, $fn=24);   // slim, clears the header spacers
+                cyl(d=4.5, h=standoff_h, anchor=TOP, $fn=24);   // slim, clears the header spacers
                 down(standoff_h)
                 cyl(d=as5600_hole_d - peg_fit, h=as5600_pcb.z - 0.2, chamfer1=0.3, anchor=TOP, $fn=24);
             }

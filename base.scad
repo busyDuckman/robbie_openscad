@@ -33,7 +33,7 @@ pinion_shaft_fit = 0.0; // added to the n20 D hole, 0 = nominal (press fit on X1
 //parts
 magnet_d = 5.98; //ie should fit a 6mm hole
 magnet_h = 2.5; //ie should fit a 6mm hole
-magnet_offset = 1.0; // adjust to soud magnet strength
+magnet_offset = 1.0; // adjust to set magnet strength
 
 
 // printer tolerances
@@ -69,6 +69,12 @@ module base() {
     
 
 
+}
+
+module inner_collar_ring(e=0)
+{
+    tube(id=collar_od()-32-e*2, od=base_id+e*2, h=collar_h+3+e, 
+         chamfer=0.5, anchor=BOTTOM, $fn=512);
 }
 
 module collar() {
@@ -196,15 +202,65 @@ module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) 
     }
 }
 
-//stack some sled_shape() of differen outer circles sise on top of each other to check alignments.
-module sled_demo() {
-    sizes = [base_id - 10, base_id, base_id + 10, base_id + 20];
-    for (i = idx(sizes))
-        up(i * 2)
-        color(["red", "green", "blue", "orange"][i])
-        sled_shape(2, pinion_hole_d=n20_shaft.x, greater_d=sizes[len(sizes) - 1 - i]);
+upper_sled_z = 10; // upper sled bottom above the collar bottom
+sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
+sensor_fit = 0.2;  // pocket clearance around the pcb
+
+// heights in the sled frame (z=0 at the collar bottom)
+function magnet_top() = collar_gear_h + magnet_offset + magnet_h;
+function sensor_z() = magnet_top() + sensor_gap + as5600_chip_top(); // pcb back face, board is chip down
+
+// as5600 board chip down over the magnet
+module sensor() {
+    up(sensor_z())
+    yrot(180)
+    //as5600_board(headers=BOTTOM, right_angle=true);
+    as5600_board();
 }
 
+// position at the bolr holes
+module at_sled_holes(pionion_r=0) {
+    //fwd(5)
+    for (side=[-1, 1])
+        left(13 * side)
+            children();
+}
+
+module upper_sled(pionion_r=0) {
+    difference() {
+        union() {
+            sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
+            at_sled_holes()
+                cyl(d=6, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
+        }
+
+        // ring is centred on the collar centre, which is +Y pinion_dist() in the sled frame
+        back(pinion_dist()) down(upper_sled_z)
+        inner_collar_ring(e=0.1);
+
+        // pcb pocket, open at the top
+        up(sensor_z() - as5600_pcb.z - upper_sled_z)
+        cuboid([as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit, 20],
+               rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+               
+        up(2)
+        at_sled_holes()
+            self_tap_hole(gauge=4, length=18, screw_type=my_screw_no_head,
+                  hole_type=HOLE_SNUG, anchor=TOP);
+        
+    }
+}
+
+module lower_sled(pionion_r=0) {
+    render()
+    difference() {
+        sled_shape(3);
+        at_sled_holes()
+            yrot(180)
+                self_tap_hole(gauge=4, length=18, screw_type=my_screw,
+                    hole_type=HOLE_SNUG, anchor=TOP);
+    }
+}
 
 module sled_assembly(pionion_r=0) {
     down(3)
@@ -212,17 +268,14 @@ module sled_assembly(pionion_r=0) {
     pinion(gear_spin=pionion_r);
     
     down(3)
-    sled_shape(3);
+    lower_sled();
     
-    /*
-    up(10)
-    sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
     
-    up(20)
-    yrot(180)
-    //zrot(45)
-    as5600_board(headers=BOTTOM);
-    */
+    up(upper_sled_z)
+    upper_sled(pionion_r);
+    
+    sensor();
+    
 }
 
 
@@ -253,6 +306,10 @@ if(part == 2) {
 }
 
 if(part == 4) {
+    pinion();
+}
+
+if(part == 5) {
     sled_assembly();
 }
 
