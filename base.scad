@@ -60,6 +60,7 @@ fob_h = 5;         // post under the lower sled
 fob_d = 6;
 fob_flare = 1;     // flare where it meets the sled
 fob_lead_in = .5;   // rolling_interface() size on the corners, so it rides over the home switch
+sled_lead_in = .5;  // same, on the lower sled's outer corners
 
 sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
 sensor_fit = 0.2;  // pocket clearance around the pcb
@@ -226,6 +227,19 @@ module sled_shape(h, pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) 
     sled_profile(pinion_hole_d, slice_a, slice_d, greater_d);
 }
 
+// where a sled side meets the slice_d circle, s = -1 left, 1 right
+// (the outer corners of a sled whose greater_d = slice_d)
+function sled_slice_point(s, slice_a = 45, slice_d = base_id) =
+    [0, pinion_dist()] + slice_d/2 * [sin(s*slice_a/2), -cos(s*slice_a/2)];
+
+// where a sled side leaves the shaft circle (r = 33/2) on its way out to sled_slice_point()
+function sled_tangent_point(s, slice_a = 45, slice_d = base_id) =
+    let(r = 33/2,
+        p = sled_slice_point(s, slice_a, slice_d),
+        l = norm(p),
+        phi = atan2(p.y, p.x))
+    r * [cos(phi + s*acos(r/l)), sin(phi + s*acos(r/l))];
+
 // 2D outline of sled_shape()
 module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
     greater_d = is_def(greater_d) ? greater_d : slice_d;
@@ -234,10 +248,8 @@ module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
 
     // far points along each side, s = -1 left, 1 right
     far = [for (s = [-1, 1]) let(
-                p = c + slice_d/2 * [sin(s*slice_a/2), -cos(s*slice_a/2)],
-                l = norm(p),
-                phi = atan2(p.y, p.x),
-                t = r * [cos(phi + s*acos(r/l)), sin(phi + s*acos(r/l))] // tangent point
+                p = sled_slice_point(s, slice_a, slice_d),
+                t = sled_tangent_point(s, slice_a, slice_d)
            ) t + (p - t) * 10];
     assert(far[1].x > far[0].x, "sled_shape: slice_a too small, sides must flare out from the shaft circle");
 
@@ -407,16 +419,27 @@ module upper_sled(pionion_r=0) {
 // negative for a sharp  edges sitting on the rotation surface, so whatever it passes
 //   - ratio: (lead edge : running edge)
 //   - knee: pulls the bend towards the corner (0 = sharp knee, 1 = gentle)
+//   - side_ang: the corner's inside angle between the rotation surface and the side face, so the
+//     curve meets the side face tangent too
 
-function rolling_interface_path(size, ratio=2, knee=0.3) =
-    let(curve = bezier_curve([[-ratio*size, 0], [-ratio*size*knee, 0], [0, size*knee], [0, size]],
+function rolling_interface_path(size, ratio=2, knee=0.3, side_ang=90) =
+    let(u = [-1, 0],                              // along the rotation surface, into the part
+        v = [-cos(side_ang), sin(side_ang)],      // along the side face, into the part
+        n = [v.y, -v.x],                          // side face normal, out of the part
+        curve = bezier_curve([ratio*size*u, ratio*size*knee*u, size*knee*v, size*v],
                              splinesteps=max(8, round(48*LOD))))
-    concat(curve, [[size, size], [size, -size], [-ratio*size, -size]]);
+    concat(curve, [size*v + size*n, size*n + [0, -size], [-ratio*size, -size]]);
 
-module rolling_interface(size, h, ratio=2, knee=0.3) {
+module rolling_interface(size, h, ratio=2, knee=0.3, side_ang=90) {
     linear_extrude(h)
-    polygon(rolling_interface_path(size, ratio, knee));
+    polygon(rolling_interface_path(size, ratio, knee, side_ang));
 }
+
+// side_ang for rolling_interface() at a frame from rotation_surface_frame(), given the side face's
+// direction into the part
+function rolling_side_ang(frame, side_dir) =
+    let(u = point2d(apply(frame, [-1, 0, 0]) - apply(frame, [0, 0, 0])))
+    vector_angle(u, side_dir);
 
 // fob to press the home switch
 module lower_sled_fob(h) {
@@ -434,14 +457,19 @@ module lower_sled_fob(h) {
         corners = function(d) sort(circle_circle_intersection(d1=d, cp1=fob_centre, d2=base_id, cp2=collar_centre));
         body = corners(fob_d);
         top = corners(fob_d + 2*fob_flare);
-        path = rolling_interface_path(fob_lead_in);
         for (i = [0, 1]) {
             body_frame = rotation_surface_frame(body[i], collar_centre, fob_centre);
             top_frame = rotation_surface_frame(top[i], collar_centre, fob_centre);
 
+            // side face is the post's circle, its tangent at the corner heading in towards the collar centre
+            radial = body[i] - fob_centre;
+            tangent = [-radial.y, radial.x];
+            side_ang = rolling_side_ang(body_frame, (collar_centre - body[i]) * tangent > 0 ? tangent : -tangent);
+            path = rolling_interface_path(fob_lead_in, side_ang=side_ang);
+
             multmatrix(body_frame)
             down(0.01)
-            rolling_interface(fob_lead_in, h - fob_flare + 0.02);
+            rolling_interface(fob_lead_in, h - fob_flare + 0.02, side_ang=side_ang);
 
             // up the flare the corner moves out, skin between the two (the cut is concave, so no hull)
             skin([rolling_interface_slice(path, body_frame, h - fob_flare),
@@ -478,6 +506,17 @@ module lower_sled(pionion_r=0) {
         // wire drop, under the fairing channel
         back(wire_channel_y())
         cuboid([wire_channel.x, wire_channel.y, 10]);
+
+        // outer corners sit on the rotation surface, give them the same lead-in as the fob
+        for (s = [-1, 1]) {
+            p = sled_slice_point(s);
+            frame = rotation_surface_frame(p, [0, pinion_dist()], [0, 0]);
+            side_ang = rolling_side_ang(frame, sled_tangent_point(s) - p);
+
+            multmatrix(frame)
+            down(0.01)
+            rolling_interface(sled_lead_in, lower_sled_h + 0.02, side_ang=side_ang);
+        }
 
         at_sled_holes()
             yrot(180)
