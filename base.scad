@@ -54,6 +54,13 @@ function collar_od() = half_way(base_od, base_id);
 function collar_holes_r() = 110/2; //half_way(collar_od(), base_id) / 2;
 
 upper_sled_z = 10; // upper sled bottom above the collar bottom
+lower_sled_h = 3;  // lower sled thickness, hangs below the collar bottom
+
+fob_h = 5;         // post under the lower sled
+fob_d = 6;
+fob_flare = 1;     // flare where it meets the sled
+fob_lead_in = .5;   // rolling_interface() size on the corners, so it rides over the home switch
+
 sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
 sensor_fit = 0.2;  // pocket clearance around the pcb
 sensor_standoff = 2.5; // stilt height, wire room between the pocket floor and the chip-side face
@@ -397,21 +404,75 @@ module upper_sled(pionion_r=0) {
     }
 }
 
+// negative for a sharp  edges sitting on the rotation surface, so whatever it passes
+//   - ratio: (lead edge : running edge)
+//   - knee: pulls the bend towards the corner (0 = sharp knee, 1 = gentle)
+
+function rolling_interface_path(size, ratio=2, knee=0.3) =
+    let(curve = bezier_curve([[-ratio*size, 0], [-ratio*size*knee, 0], [0, size*knee], [0, size]],
+                             splinesteps=max(8, round(48*LOD))))
+    concat(curve, [[size, size], [size, -size], [-ratio*size, -size]]);
+
+module rolling_interface(size, h, ratio=2, knee=0.3) {
+    linear_extrude(h)
+    polygon(rolling_interface_path(size, ratio, knee));
+}
+
+// fob to press the home switch
 module lower_sled_fob(h) {
-    intersection() {
-        sled_shape(h);
-        fwd(15)  //draft
-        # cyl(d=6, h=h+1, $fn=64*LOD, chamfer2=-1, anchor=BOTTOM);
+    fob_centre = [0, -(base_id/2 - pinion_dist())]; // outer edge of the lower sled
+    collar_centre = [0, pinion_dist()];
+
+    difference() {
+        intersection() {
+            sled_shape(h);
+            translate(fob_centre)
+            cyl(d=fob_d, h=h, chamfer1=0.5, chamfer2=-fob_flare, anchor=BOTTOM, $fn=64*LOD);
+        }
+
+        // the two corners where the post meets the rotation surface, following them out up the flare
+        corners = function(d) sort(circle_circle_intersection(d1=d, cp1=fob_centre, d2=base_id, cp2=collar_centre));
+        body = corners(fob_d);
+        top = corners(fob_d + 2*fob_flare);
+        path = rolling_interface_path(fob_lead_in);
+        for (i = [0, 1]) {
+            body_frame = rotation_surface_frame(body[i], collar_centre, fob_centre);
+            top_frame = rotation_surface_frame(top[i], collar_centre, fob_centre);
+
+            multmatrix(body_frame)
+            down(0.01)
+            rolling_interface(fob_lead_in, h - fob_flare + 0.02);
+
+            // up the flare the corner moves out, skin between the two (the cut is concave, so no hull)
+            skin([rolling_interface_slice(path, body_frame, h - fob_flare),
+                  rolling_interface_slice(path, top_frame, h + 0.01)], slices=0);
+        }
     }
+}
+
+// rolling_interface_path() placed by frame at height z, as a ccw 3d profile for skin()
+function rolling_interface_slice(path, frame, z) =
+    path3d(ccw_polygon(path2d(apply(frame, path3d(path)))), z);
+
+// frame on point p of a rotation surface centred on centre: local X along its tangent, +Y towards centre,
+// flipped so -X faces inside (a point in the part) when given
+function rotation_surface_frame(p, centre, inside) =
+    let(a = atan2(p.y - centre.y, p.x - centre.x) + 90,
+        flip = is_def(inside) && (inside - p) * [cos(a), sin(a)] > 0)
+    move(p) * zrot(a) * (flip ? xflip() : ident(4));
+
+module at_rotation_surface(p, centre, inside) {
+    multmatrix(rotation_surface_frame(p, centre, inside))
+    children();
 }
 
 module lower_sled(pionion_r=0) {
     render()
     difference() {
         union() {
-            sled_shape(3);
-            down(5)
-            lower_sled_fob(5);
+            sled_shape(lower_sled_h);
+            down(fob_h)
+            lower_sled_fob(fob_h);
         }
 
         // wire drop, under the fairing channel
@@ -426,11 +487,11 @@ module lower_sled(pionion_r=0) {
 }
 
 module sled_assembly(pionion_r=0) {
-    down(3)
+    down(lower_sled_h)
         n20_motor();
     pinion(gear_spin=pionion_r);
-    
-    down(3)
+
+    down(lower_sled_h)
     lower_sled();
     
     
