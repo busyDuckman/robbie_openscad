@@ -58,7 +58,8 @@ collar_holes_sa = 360/8/2; // half a step, so no screw sits over the cable hole 
 home_switch_a = 180;       // above the cable hole (-X)
 home_switch_press = 0.25;  // fob pushes the plunger this far past its click point (d2f overtravel ~0.5)
 home_switch_fit = 0.2;     // pocket clearance
-home_switch_plug_fit = 0.1; // plug in the pocket
+home_switch_plug_fit = 0.05; // plug in the pocket
+home_switch_plug_corner_r = 0.6; // rounds the plug's back corners, so the pocket's corners aren't the tight spot
 home_switch_overcut = 2;   // pocket runs this far past the switch face into the bore, no thin base slivers
 home_switch_drop = 1;      // switch top below the lower sled, plug height = lower_sled_h + this
 home_switch_wedge = 1.5;   // plug is this much wider each side at the back than at the bore
@@ -142,17 +143,25 @@ module position_home_switch() {
 
 // plug zone of the pocket, switch top up to y1: wedge shaped in plan, wider at the back than at the bore,
 // so the plug can't slide out into the bore. inset shrinks it (plug fit)
-module home_switch_wedge(y1, inset=0) {
+// corner_r rounds the two back corners (the plug's, so it clears the printed pocket's not-quite-sharp corners)
+module home_switch_wedge(y1, inset=0, corner_r=0) {
     c = home_switch_fit;
     y0 = d2f_body.y/2;
     back_z = -d2f_pin.z + inset;
     front_z = d2f_body.z + c + home_switch_overcut;
+    back_w = d2f_body.x + 2*c + 2*home_switch_wedge - 2*inset;
 
     hull() {
-        translate([0, y0, back_z])
-        cuboid([d2f_body.x + 2*c + 2*home_switch_wedge - 2*inset, y1 - y0, 0.01], anchor=FRONT+BOTTOM);
+        if (corner_r > 0)
+            for (s = [-1, 1])
+                translate([s * (back_w/2 - corner_r), y0, back_z + corner_r])
+                    ycyl(r=corner_r, h=y1 - y0, anchor=FRONT, $fn=24);
+        else
+            translate([0, y0, back_z])
+                cuboid([back_w, y1 - y0, 0.01], anchor=FRONT+BOTTOM);
+
         translate([0, y0, front_z])
-        cuboid([d2f_body.x + 2*c - 2*inset, y1 - y0, 0.01], anchor=FRONT+TOP);
+            cuboid([d2f_body.x + 2*c - 2*inset, y1 - y0, 0.01], anchor=FRONT+TOP);
     }
 }
 
@@ -198,7 +207,7 @@ module home_switch_plug() {
     difference() {
         union() {
             // cap, switch top to base top
-            home_switch_wedge(top_y, inset=f);
+            home_switch_wedge(top_y, inset=f, corner_r=home_switch_plug_corner_r);
 
             // fingers, pocket floor up to the cap, back of the pocket up to the terminal face,
             // slim enough to leave room for a wire wrapped round each terminal and blobbed with solder
@@ -675,6 +684,10 @@ if(part == 0) {
             sled_assembly(pionion_r=pinion_spin(angle));
         // pinion_at(angle);
     }
+
+    // 25mm cube for scale
+    //right(base_od/2 + 10)
+        //cuboid(25, anchor=BOTTOM);
 }
 
 if(part == 1) {
