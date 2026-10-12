@@ -15,7 +15,7 @@ Vocab:
 // Globals
 // ----------------------------------------------------------------------------------------
 
-LOD = 1.0; //0.25;
+LOD = 0.5; //0.25;
 
 base_od = 150;
 base_id = 100;
@@ -58,6 +58,7 @@ sensor_gap = 1;    // magnet top to as5600 chip face (datasheet 0.5 - 3)
 sensor_fit = 0.2;  // pocket clearance around the pcb
 sensor_standoff = 2.5; // stilt height, wire room between the pocket floor and the chip-side face
 sensor_peg_fit = 0.1;  // stilt pegs in the pcb holes, on the diameter
+pocket_wall = 0.8;     // between the sensor pocket and the collar ring groove
 
 guard_t = 1.0;     // magnet guard wall
 guard_gap = 0.5;   // guard top below the chip-side face, clears smd parts
@@ -77,7 +78,6 @@ fairing_fit = 1.0; // clearance to the ring gear tips
 // Geometry
 // ----------------------------------------------------------------------------------------
 
-
 module base() {
     chamf = (collar_od() - base_id)/2;
     
@@ -94,14 +94,22 @@ module base() {
         self_tap_hole(gauge=my_screw_gauge, length=25, screw_type=my_screw_no_head,
                   hole_type=HOLE_TRI_TWIST, anchor=TOP, sink=0.5);
     }
-    
-    
-
 
 }
 
-module inner_collar_ring(e=0)
+//module position_home_switch_() {
+//.... children();
+//}
+
+module home_switch_holder() {
+    // position micro switch
+}
+
+
+// ----------------------------------------------------------------------------------------
+module inner_collar_ring(e=0, notches=false)
 {
+    render()
     tube(id=collar_od()-32-e*2, od=base_id+e*2, h=collar_h+3+e, 
          chamfer=0.5, anchor=BOTTOM, $fn=512);
 }
@@ -111,13 +119,14 @@ module collar() {
     render()
     difference() {
         union() {
-            tube(id=base_id, od=collar_od(), h=collar_h, anchor=BOTTOM, $fn=512);
+            tube(id=base_id, od=collar_od(), h=collar_h, anchor=BOTTOM, $fn=512*LOD);
             
             //outer collar
-            tube(id=collar_od()-6, od=collar_od(), h=collar_h+3, anchor=BOTTOM, $fn=512);
+            tube(id=collar_od()-6, od=collar_od(), h=collar_h+3, anchor=BOTTOM, $fn=512*LOD);
             
             // inner collar
-            tube(id=collar_od()-32, od=base_id, h=collar_h+3, chamfer=0.5, anchor=BOTTOM, $fn=512);
+            inner_collar_ring(notches=true);
+                
             
             ring_gear(mod=gear_mod, teeth=ring_gear_teeth , thickness=collar_gear_h, backing=10, profile_shift=pinion_shift,
                 backlash=backlash, anchor=BOTTOM, $fn=512*LOD);
@@ -132,6 +141,7 @@ module collar() {
           
 }
 
+// ----------------------------------------------------------------------------------------
 // distance from the origin to pinion centre
 function pinion_dist() = gear_dist(mod=gear_mod, teeth1=pinion_teeth, teeth2=ring_gear_teeth,
                                    profile_shift1=pinion_shift, profile_shift2=pinion_shift, internal2=true);
@@ -182,13 +192,13 @@ module pinion_shaft_hole(h) {
 
     down(0.01)
     intersection() {
-        cyl(d=d, h=h + 0.02, anchor=BOTTOM, $fn=64);
+        cyl(d=d, h=h + 0.02, anchor=BOTTOM, $fn=64*LOD);
         fwd((d - flat)/2)
         cuboid([d, flat, h + 0.02], anchor=BOTTOM);
     }
 
     down(0.01)
-    cyl(d1=d + 0.6, d2=d, h=0.3, anchor=BOTTOM, $fn=64);
+    cyl(d1=d + 0.6, d2=d, h=0.3, anchor=BOTTOM, $fn=64*LOD);
 }
 
 // pinion meshed with the collar's ring gear at `angle`
@@ -198,6 +208,7 @@ module pinion_at(angle) {
     }
 }
 
+// ----------------------------------------------------------------------------------------
 // The basic sled shape, used as a building block for multiple parts
 //   - A circle around the pinion shaft that extends to join on a segment 
 //     of a greater circle (greater_d).
@@ -236,14 +247,17 @@ module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
     }
 }
 
+// ----------------------------------------------------------------------------------------
 // heights in the sled frame (z=0 at the collar bottom)
 function magnet_top() = collar_gear_h + magnet_offset + magnet_h;
 function sensor_z() = magnet_top() + sensor_gap + as5600_chip_top(); // pcb back face, board is chip down
 
+// ----------------------------------------------------------------------------------------
 function sensor_floor_z() = sensor_z() - as5600_pcb.z - sensor_standoff; // pocket floor
 
 // wire channel centre in y, inside the fairing's innermost wall (+Y, sled r = 33/2), moved towards the pinion
 function wire_channel_y() = 33/2 - fairing_t/2 - wire_channel.y/2 - wire_channel_shift;
+
 
 // conduit around the channel, from the lower sled up to the plate, joined to the fairing wall behind it
 module wire_conduit() {
@@ -258,6 +272,7 @@ module wire_conduit() {
     }
 }
 
+// ----------------------------------------------------------------------------------------
 // as5600 board chip down over the magnet
 module sensor() {
     up(sensor_z())
@@ -293,7 +308,6 @@ module sensor_wires() {
 }
 
 
-
 // ring gear tooth tips, from the collar centre (internal teeth: addendum reduced by the shift)
 function ring_tip_r() = pitch_radius(mod=gear_mod, teeth=ring_gear_teeth) - gear_mod * (1 - pinion_shift);
 
@@ -309,6 +323,7 @@ module fairing() {
         back(pinion_dist()) circle(r=ring_tip_r() - fairing_fit, $fn=256*LOD);
     }
 }
+// ----------------------------------------------------------------------------------------
 
 // position at the bolr holes
 module at_sled_holes(pionion_r=0) {
@@ -337,10 +352,22 @@ module upper_sled(pionion_r=0) {
         inner_collar_ring(e=0.1);
 
         // pcb pocket, open at the top, floor low enough for wires under the board
+        // the wire space under the board stops short of the collar ring groove, so nothing gets in
         difference() {
-            up(sensor_floor_z() - upper_sled_z)
-            cuboid([as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit, 20],
-                   rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+            pocket = [as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit];
+            board_face = sensor_z() - as5600_pcb.z - upper_sled_z;
+            union() {
+                up(board_face)
+                cuboid([pocket.x, pocket.y, 20],
+                       rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+                intersection() {
+                    up(sensor_floor_z() - upper_sled_z)
+                    cuboid([pocket.x, pocket.y, sensor_standoff + 0.01],
+                           rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+                    back(pinion_dist())
+                    cyl(r=(collar_od() - 32)/2 - 0.1 - pocket_wall, h=50, $fn=512*LOD);
+                }
+            }
             down(upper_sled_z) {
                 sensor_stilts();
                 sensor_guard();
@@ -351,11 +378,16 @@ module upper_sled(pionion_r=0) {
         translate([0, wire_channel_y(), -upper_sled_z - 0.1])
         cuboid([wire_channel.x, wire_channel.y, sensor_floor_z() + 0.2], anchor=BOTTOM);
 
-        // and across the plate from the pocket to the channel
-        translate([0, wire_channel_y() + wire_channel.y/2, -0.1])
-        cuboid([wire_channel.x, wire_channel_y() + wire_channel.y/2 - as5600_pcb.y/2 + 2,
-                sensor_floor_z() - upper_sled_z + 0.2],
-               anchor=BOTTOM+BACK);
+        // angled run from under the board, below the pocket wall, down into the channel
+        let(edge = as5600_pcb.y/2 + sensor_fit,
+            floor_l = sensor_floor_z() - upper_sled_z,
+            face_l = sensor_z() - as5600_pcb.z - upper_sled_z)
+        hull() {
+            translate([0, edge, floor_l])
+            cuboid([wire_channel.x, 1, face_l - floor_l], anchor=BOTTOM+BACK);
+            translate([0, wire_channel_y(), -3])
+            cuboid([wire_channel.x, wire_channel.y, 0.01], anchor=BOTTOM);
+        }
                
         up(2)
         at_sled_holes()
@@ -365,10 +397,22 @@ module upper_sled(pionion_r=0) {
     }
 }
 
+module lower_sled_fob(h) {
+    intersection() {
+        sled_shape(h);
+        fwd(15)  //draft
+        # cyl(d=6, h=h+1, $fn=64*LOD, chamfer2=-1, anchor=BOTTOM);
+    }
+}
+
 module lower_sled(pionion_r=0) {
     render()
     difference() {
-        sled_shape(3);
+        union() {
+            sled_shape(3);
+            down(5)
+            lower_sled_fob(5);
+        }
 
         // wire drop, under the fairing channel
         back(wire_channel_y())
@@ -386,12 +430,12 @@ module sled_assembly(pionion_r=0) {
         n20_motor();
     pinion(gear_spin=pionion_r);
     
-    //down(3)
-    //lower_sled();
+    down(3)
+    lower_sled();
     
     
     up(upper_sled_z)
-    # upper_sled(pionion_r);
+    upper_sled(pionion_r);
     
     sensor();
     sensor_wires();
@@ -408,8 +452,8 @@ part = 0;
 // full assembly
 if(part == 0) {
     //base();
-    //up(base_h)
-    //collar();
+    up(base_h)
+    collar();
     
     
 
