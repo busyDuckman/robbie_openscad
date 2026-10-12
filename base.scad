@@ -21,6 +21,7 @@ base_od = 150;
 base_id = 100;
 base_cable_dia = 12;
 base_h = 40;
+base_chamfer_h = 15;    // vertical drop of the outer top chamfer (horizontal is set by the collar od)
 
 collar_h = 10;
 collar_gear_h = 8;
@@ -52,11 +53,22 @@ function half_way(a, b) = (a + b) / 2;
 
 function collar_od() = half_way(base_od, base_id);
 function collar_holes_r() = 110/2; //half_way(collar_od(), base_id) / 2;
+collar_holes_sa = 360/8/2; // half a step, so no screw sits over the cable hole / home switch
+
+home_switch_a = 180;       // above the cable hole (-X)
+home_switch_press = 0.25;  // fob pushes the plunger this far past its click point (d2f overtravel ~0.5)
+home_switch_fit = 0.2;     // pocket clearance
+home_switch_plug_fit = 0.1; // plug in the pocket
+home_switch_overcut = 2;   // pocket runs this far past the switch face into the bore, no thin base slivers
+home_switch_drop = 1;      // switch top below the lower sled, plug height = lower_sled_h + this
+home_switch_wedge = 1.5;   // plug is this much wider each side at the back than at the bore
+home_switch_guard_min = 0.4; // thinnest base sliver kept in front of the switch as its forward guard
+home_switch_solder_d = 3.2;  // room round each terminal for a wrapped wire and a generous solder blob
 
 upper_sled_z = 10; // upper sled bottom above the collar bottom
 lower_sled_h = 3;  // lower sled thickness, hangs below the collar bottom
 
-fob_h = 5;         // post under the lower sled
+fob_h = 10;         // post under the lower sled
 fob_d = 6;
 fob_flare = 1;     // flare where it meets the sled
 fob_lead_in = .5;   // rolling_interface() size on the corners, so it rides over the home switch
@@ -93,24 +105,113 @@ module base() {
     
     render()
     difference() {
-        tube(id=base_id, od=base_od, h=base_h , ochamfer2=chamf, anchor=BOTTOM, $fn=512*LOD);
-        
+        // outer top chamfer: chamf in, base_chamfer_h down (tube() has no chamfer angle, so cyl minus bore)
+        cyl(d=base_od, h=base_h, chamfer2=chamf, chamfang2=atan(base_chamfer_h / chamf),
+            anchor=BOTTOM, $fn=512*LOD);
+        cyl(d=base_id, h=3*base_h, $fn=512*LOD);
+
         xcyl(h=base_od/1.9, d=base_cable_dia, $fn=64*LOD, anchor=RIGHT);
         
         up(base_h)
-        zrot_copies(n=8, r=collar_holes_r())
+        zrot_copies(n=8, r=collar_holes_r(), sa=collar_holes_sa)
         self_tap_hole(gauge=my_screw_gauge, length=25, screw_type=my_screw_no_head,
                   hole_type=HOLE_TRI_TWIST, anchor=TOP, sink=0.5);
+
+        home_switch_holder();
     }
 
 }
 
-//module position_home_switch_() {
-//.... children();
-//}
+// switch centre (and plunger) height in the base: switch top home_switch_drop under the lower sled,
+// so the plug above it is at least as tall as the lower sled it faces
+function home_switch_z() = base_h - lower_sled_h - home_switch_drop - d2f_body.y/2;
 
+// d2f switch frame: in the base wall at home_switch_a, plunger pointing in at the bore, body thickness vertical,
+// set back so the fob (flush with the bore) pushes the plunger home_switch_press past its click point,
+// slid along so the (off centre) plunger sits on home_switch_a
+function home_switch_frame() =
+    zrot(home_switch_a)
+    * move([base_id/2 + d2f_plunger_op_h - home_switch_press, 0, home_switch_z()])
+    * zrot(-90) * xrot(90) // switch +Z -> in towards the centre, switch +Y -> up
+    * left(d2f_plunger_x);
+
+module position_home_switch() {
+    multmatrix(home_switch_frame())
+    children();
+}
+
+// plug zone of the pocket, switch top up to y1: wedge shaped in plan, wider at the back than at the bore,
+// so the plug can't slide out into the bore. inset shrinks it (plug fit)
+module home_switch_wedge(y1, inset=0) {
+    c = home_switch_fit;
+    y0 = d2f_body.y/2;
+    back_z = -d2f_pin.z + inset;
+    front_z = d2f_body.z + c + home_switch_overcut;
+
+    hull() {
+        translate([0, y0, back_z])
+        cuboid([d2f_body.x + 2*c + 2*home_switch_wedge - 2*inset, y1 - y0, 0.01], anchor=FRONT+BOTTOM);
+        translate([0, y0, front_z])
+        cuboid([d2f_body.x + 2*c - 2*inset, y1 - y0, 0.01], anchor=FRONT+TOP);
+    }
+}
+
+// negative: pocket for the lever-less d2f, open up through the base top, plunger hole out to the bore
 module home_switch_holder() {
-    // position micro switch
+    c = home_switch_fit;
+    up_open = base_h - home_switch_z() + 1; // switch +Y is up
+
+    position_home_switch() {
+        // body and terminals
+        translate([0, -(d2f_body.y/2 + c), -d2f_pin.z])
+        cuboid([d2f_body.x + 2*c, d2f_body.y + 2*c, d2f_pin.z + d2f_body.z + c], anchor=FRONT+BOTTOM);
+
+        // in front of the switch the base is left as the forward guard: the slivers between the flat pocket
+        // face and the curved bore. open the middle, where they'd be thinner than home_switch_guard_min
+        // (measured from home_switch_a, which is at the plunger; clamped to the pocket's ends)
+        let(face = base_id/2 + d2f_plunger_op_h - home_switch_press - d2f_body.z - c, // pocket face from the axis
+            r = base_id/2,
+            half = sqrt(r*r - pow(min(r, face - home_switch_guard_min), 2)),
+            lo = max(-half, -(d2f_body.x/2 + c) - d2f_plunger_x),
+            hi = min(half, d2f_body.x/2 + c - d2f_plunger_x))
+        translate([d2f_plunger_x + (lo + hi)/2, -(d2f_body.y/2 + c), d2f_body.z])
+        cuboid([hi - lo, d2f_body.y + 2*c, c + home_switch_overcut], anchor=FRONT+BOTTOM);
+
+        // plug
+        home_switch_wedge(up_open);
+
+        // plunger
+        translate([d2f_plunger_x, 0, d2f_body.z])
+        cuboid([d2f_plunger.x + 2*c, d2f_plunger.y + 2*c, 5], anchor=BOTTOM);
+    }
+}
+
+// fills the pocket above the switch flush with the base top (the collar holds it down), wedge shaped so it
+// can't slide out into the bore, with fingers down behind the switch between the terminals so it can't slide back
+// drawn in the switch frame (+Y up, +Z towards the bore), place with position_home_switch()
+module home_switch_plug() {
+    c = home_switch_fit;
+    f = home_switch_plug_fit;
+    top_y = base_h - home_switch_z(); // switch +Y is up
+
+    color("orange")
+    difference() {
+        union() {
+            // cap, switch top to base top
+            home_switch_wedge(top_y, inset=f);
+
+            // fingers, pocket floor up to the cap, back of the pocket up to the terminal face,
+            // slim enough to leave room for a wire wrapped round each terminal and blobbed with solder
+            for (x = [-1, 1] * d2f_pin_pitch/2)
+                translate([x, -(d2f_body.y/2 + c) + f, -d2f_pin.z + f])
+                cuboid([d2f_pin_pitch - home_switch_solder_d, d2f_body.y + c - f + 0.01, d2f_pin.z - f],
+                       anchor=FRONT+BOTTOM);
+        }
+
+        // flush with the bore (bore brought into the switch frame)
+        multmatrix(matrix_inverse(home_switch_frame()))
+        cyl(d=base_id, h=3*base_h, $fn=512*LOD);
+    }
 }
 
 
@@ -141,7 +242,7 @@ module collar() {
         }
     
         up(collar_h)
-        zrot_copies(n=8, r=collar_holes_r())
+        zrot_copies(n=8, r=collar_holes_r(), sa=collar_holes_sa)
             self_tap_hole(gauge=my_screw_gauge, length=25, screw_type=my_screw,
                   hole_type=HOLE_CLEARANCE, anchor=TOP, sink=5);
           //cyl(h=20, d=6, $fn=64*LOD, anchor=BOTTOM);
@@ -164,7 +265,9 @@ function pinion_spin(angle) = -angle * ring_gear_teeth / pinion_teeth
 
 // move children to the pinion position, turning with the orbit (sled frame, +Y faces collar centre)
 module at_pinion(angle) {
-    zrot(angle) fwd(pinion_dist()) children();
+    zrot(angle)
+        fwd(pinion_dist())
+            children();
 }
 
 module pinion(gear_spin=0) {
@@ -259,7 +362,8 @@ module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
                 circle(r=r, $fn=128*LOD);
                 polygon([far[0], far[1], [0, 0]]);
             }
-            translate(c) circle(d=greater_d, $fn=512*LOD);
+            translate(c)
+                circle(d=greater_d, $fn=512*LOD);
         }
         if (is_def(pinion_hole_d))
             circle(d=pinion_hole_d, $fn=64*LOD);
@@ -287,7 +391,8 @@ module wire_conduit() {
     linear_extrude(upper_sled_z)
     intersection() {
         sled_profile();
-        back(front_y) rect([wire_channel.x + 2*fairing_t, 20], anchor=FRONT);
+        back(front_y)
+            rect([wire_channel.x + 2*fairing_t, 20], anchor=FRONT);
     }
 }
 
@@ -337,9 +442,11 @@ module fairing() {
     intersection() {
         difference() {
             sled_profile();
-            offset(r=-fairing_t) sled_profile();
+            offset(r=-fairing_t)
+                sled_profile();
         }
-        back(pinion_dist()) circle(r=ring_tip_r() - fairing_fit, $fn=256*LOD);
+        back(pinion_dist())
+            circle(r=ring_tip_r() - fairing_fit, $fn=256*LOD);
     }
 }
 // ----------------------------------------------------------------------------------------
@@ -367,8 +474,9 @@ module upper_sled(pionion_r=0) {
         }
 
         // ring is centred on the collar centre, which is +Y pinion_dist() in the sled frame
-        back(pinion_dist()) down(upper_sled_z)
-        inner_collar_ring(e=0.1);
+        back(pinion_dist())
+            down(upper_sled_z)
+                inner_collar_ring(e=0.1);
 
         // pcb pocket, open at the top, floor low enough for wires under the board
         // the wire space under the board stops short of the collar ring groove, so nothing gets in
@@ -534,11 +642,11 @@ module sled_assembly(pionion_r=0) {
     lower_sled();
     
     
-    up(upper_sled_z)
-    upper_sled(pionion_r);
+    //up(upper_sled_z)
+    //upper_sled(pionion_r);
     
-    sensor();
-    sensor_wires();
+    //sensor();
+    //sensor_wires();
 }
 
 
@@ -551,9 +659,13 @@ part = 0;
 
 // full assembly
 if(part == 0) {
-    //base();
-    up(base_h)
-    collar();
+    base();
+    position_home_switch()
+        d2f_switch(lever=false);
+    #position_home_switch()
+        home_switch_plug();
+    //up(base_h)
+    //collar();
     
     
 
@@ -581,7 +693,36 @@ if(part == 5) {
     sled_assembly();
 }
 
+// home switch plug, top face down on the bed
+if(part == 6) {
+    up(base_h - home_switch_z())
+        xrot(-90) // switch frame +Y (up) -> -Z, top face down
+            home_switch_plug();
+}
 
+// test print: just the base around the home switch pocket, for fitting the switch and plug
+if(part == -2) {
+    test = [25, 30, 15]; // radial (from the bore), tangential, height (down from the base top)
+
+    //down(base_h - test.z) left(base_id/2 - 1)
+    
+    render()
+    intersection() {
+        zrot(-home_switch_a)
+            base();
+        translate([base_id/2 - 5, 0, base_h - test.z])
+            cuboid(test, anchor=LEFT+BOTTOM);
+    }
+
+}
+
+
+// Demos and tests
+
+if(part == -2) {
+  // just the secion of the base with the mico pocket and the plug. 
+  // layed out for 3d printing
+}
 
 
 

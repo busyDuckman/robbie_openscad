@@ -44,11 +44,16 @@ d2f_body = [12.8, 5.8, 6.5];   // length, thickness, height to the plunger face
 d2f_lever = [12.5, 3, 0.3];    // length, width, thickness (measure)
 d2f_lever_free_h = 10;         // lever tip height above the terminal face when free
 d2f_lever_op_h = 6.8;          // lever tip height when it clicks (datasheet +-1.5, measure)
-d2f_pin = [0.6, 3.5];          // terminal blade thickness, length
-d2f_pin_pitch = 5.08;
-d2f_hole_d = 2;                // mounting holes through the thickness (datasheet, measure)
-d2f_hole_spacing = 6.5;        // centred along the length (measure)
-d2f_hole_z = 2.9;              // hole centre above the terminal face (not on datasheet, measure)
+// sizes from reference_images/G1003-150P00A-PCB-Best-Mouse-Micro-Switch-1-2.png
+d2f_plunger = [1.15, 2.9];     // button along the length, across the thickness, round topped
+d2f_plunger_x = 3.15 + 5.20 - 12.8/2; // button centre from the body centre, towards +X (hole 3.15 in, then 5.20)
+d2f_plunger_free_h = 7.3;      // button top above the terminal face when free (scaled off drawing, measure)
+d2f_plunger_op_h = 6.9;        // button top when it clicks (not on drawing, measure; overtravel ~0.5 past this)
+d2f_pin = [0.9, 0.6, 3.5];     // terminal blade width, thickness, length
+d2f_pin_pitch = 5.08;          // 3 terminals, centred
+d2f_hole_d = 2;                // mounting holes through the thickness
+d2f_hole_spacing = 6.5;        // centred along the length
+d2f_hole_z = 1.9;              // hole centre above the terminal face (scaled off drawing, measure)
 
 // children at each mounting hole centre, run them along Y to go through the body
 module d2f_hole_positions() {
@@ -57,27 +62,37 @@ module d2f_hole_positions() {
     children();
 }
 
-// clearance grows the body (not the lever or pins) for use as a cutter
-module d2f_switch(clearance=0) {
+// clearance grows the body and plunger (not the lever or pins) for use as a cutter
+// lever=false for the lever removed, plunger only
+module d2f_switch(clearance=0, lever=true) {
     c = clearance;
 
     color("#222")
     difference() {
         cuboid([d2f_body.x + 2*c, d2f_body.y + 2*c, d2f_body.z + 2*c], anchor=BOTTOM, $fn=16);
         if (c == 0)
-            d2f_hole_positions() ycyl(d=d2f_hole_d, h=2*d2f_body.y, $fn=24);
+            d2f_hole_positions()
+                ycyl(d=d2f_hole_d, h=2*d2f_body.y, $fn=24);
     }
 
+    // button at its free height, off centre towards +X
+    color("red")
+    translate([d2f_plunger_x, 0, d2f_body.z - 0.01])
+    cuboid([d2f_plunger.x + 2*c, d2f_plunger.y + 2*c, d2f_plunger_free_h - d2f_body.z + 0.01],
+           rounding=c == 0 ? d2f_plunger.x/2 - 0.01 : 0, edges=[TOP+LEFT, TOP+RIGHT], anchor=BOTTOM, $fn=16);
+
     // lever, from the hinge end up to the free tip
-    lever_rise = d2f_lever_free_h - d2f_body.z - 0.5;
-    color("silver")
-    translate([-d2f_body.x/2 + 0.5, 0, d2f_body.z + 0.5])
-    yrot(-atan(lever_rise / d2f_lever.x))
-    cuboid(d2f_lever, anchor=BOTTOM+LEFT);
+    if (lever) {
+        lever_rise = d2f_lever_free_h - d2f_body.z - 0.5;
+        color("silver")
+        translate([-d2f_body.x/2 + 0.5, 0, d2f_body.z + 0.5])
+        yrot(-atan(lever_rise / d2f_lever.x))
+        cuboid(d2f_lever, anchor=BOTTOM+LEFT);
+    }
 
     color("gold")
     xcopies(spacing=d2f_pin_pitch, n=3)
-    cuboid([3, d2f_pin.x, d2f_pin.y], anchor=TOP);
+    cuboid(d2f_pin, anchor=TOP);
 }
 
 
@@ -101,13 +116,16 @@ function as5600_chip_top() = as5600_pcb.z + as5600_chip.z;
 module as5600_hole_positions() {
     s = as5600_pcb.x/2 - as5600_hole_inset;
     for (x = [-s, s], y = [-s, s])
-        translate([x, y, 0]) children();
+        translate([x, y, 0])
+            children();
 }
 
 // children at each header through hole, z=0 at pcb bottom (3 at -x, 4 at +x)
 module as5600_via_positions() {
     for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
-        right(h[0]) ycopies(spacing=header_pitch, n=h[1]) children();
+        right(h[0])
+            ycopies(spacing=header_pitch, n=h[1])
+                children();
 }
 
 // one header strip of n pins along Y, pcb surface at z=0
@@ -178,9 +196,14 @@ module as5600_board(clearance=0, headers, right_angle=false) {
     // mirror the -x column so right angle pins point outward
     if (headers == TOP)
         for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
-            translate([h[0], 0, as5600_pcb.z]) mirror([h[0] < 0 ? 1 : 0, 0, 0]) header_strip(h[1], right_angle);
+            translate([h[0], 0, as5600_pcb.z])
+                mirror([h[0] < 0 ? 1 : 0, 0, 0])
+                    header_strip(h[1], right_angle);
 
     if (headers == BOTTOM)
         for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
-            translate([h[0], 0, 0]) zflip() mirror([h[0] < 0 ? 1 : 0, 0, 0]) header_strip(h[1], right_angle);
+            translate([h[0], 0, 0])
+                zflip()
+                    mirror([h[0] < 0 ? 1 : 0, 0, 0])
+                        header_strip(h[1], right_angle);
 }
