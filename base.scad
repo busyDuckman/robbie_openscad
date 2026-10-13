@@ -7,6 +7,7 @@ include <NopSCADlib/vitamins/extrusions.scad>
 include <screw_holes.scad>
 include <components.scad>
 include <helpers.scad>
+use <nop_screws.scad>
 
 /*
 Vocab:
@@ -597,6 +598,38 @@ module at_sled_holes(pionion_r=0) {
             children();
 }
 
+// pcb pocket (negative, upper sled frame), open at the top, floor low enough for wires under the
+// board, the stilts and magnet guard left standing in it
+module sensor_pocket() {
+    difference() {
+        sensor_pocket_negative();
+        down(upper_sled_z) {
+            sensor_stilts();
+            sensor_guard();
+        }
+    }
+}
+
+// The as5600_pcb board's pocket
+//   - space for wires to run and a gaurd around the sensort to stop them interfearing.
+//   - stops short of the collar ring groove.
+module sensor_pocket_negative() {
+    pocket = [as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit];
+    board_face = sensor_z() - as5600_pcb.z - upper_sled_z;
+
+    up(board_face)
+        cuboid([pocket.x, pocket.y, 20],
+               rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+
+    intersection() {
+        up(sensor_floor_z() - upper_sled_z)
+            cuboid([pocket.x, pocket.y, sensor_standoff + 0.01],
+                   rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
+        back(pinion_dist())
+            cyl(r=(collar_od() - 32)/2 - 0.1 - pocket_wall, h=50, $fn=512*LOD);
+    }
+}
+
 module upper_sled(pionion_r=0) {
     difference() {
         union() {
@@ -625,28 +658,7 @@ module upper_sled(pionion_r=0) {
             down(upper_sled_z)
                 inner_collar_ring(e=0.1);
 
-        // pcb pocket, open at the top, floor low enough for wires under the board
-        // the wire space under the board stops short of the collar ring groove, so nothing gets in
-        difference() {
-            pocket = [as5600_pcb.x + 2*sensor_fit, as5600_pcb.y + 2*sensor_fit];
-            board_face = sensor_z() - as5600_pcb.z - upper_sled_z;
-            union() {
-                up(board_face)
-                cuboid([pocket.x, pocket.y, 20],
-                       rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
-                intersection() {
-                    up(sensor_floor_z() - upper_sled_z)
-                    cuboid([pocket.x, pocket.y, sensor_standoff + 0.01],
-                           rounding=1 + sensor_fit, edges="Z", anchor=BOTTOM, $fn=24*LOD);
-                    back(pinion_dist())
-                    cyl(r=(collar_od() - 32)/2 - 0.1 - pocket_wall, h=50, $fn=512*LOD);
-                }
-            }
-            down(upper_sled_z) {
-                sensor_stilts();
-                sensor_guard();
-            }
-        }
+        sensor_pocket();
 
         // wire drop: from the pocket floor through the plate and down the inside of the fairing's inner wall
         translate([0, wire_channel_y(), -upper_sled_z - 0.1])
@@ -868,11 +880,19 @@ module sled_assembly(pionion_r=0, expand = 0) {
     up(30 * expand)
     down(lower_sled_h)
      lower_sled();
+
+    // 6g x 16 countersunk, up through the lower sled into the upper sled
+    up(10 * expand)
+    down(lower_sled_h)
+        at_sled_holes()
+            yrot(180)
+                no6_cs_screw(16);
     
     
     up(50 * expand)
     up(upper_sled_z)
         upper_sled(pionion_r);
+        
     
     up(70 * expand)
     up(upper_sled_z + upper_sled_h)
@@ -910,8 +930,8 @@ module guide() {
 // Render
 // ----------------------------------------------------------------------------------------
 part = 0;
-expand = 0;     // 0 = assembeld, 1.0 = fully expanded. Can be animated.
-slice_mode = 1; // cut the assembly: 0 none
+expand = $t; //0.5;     // 0 = assembeld, 0.5 = base expanded only, 1.0 = fully expanded. Can be animated.
+slice_mode = 0; // cut the assembly: 0 none
                 //   1 X/Z plane (y = 0, through the home switch plunger), keep +Y
                 //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
                 //   3 both 1 and 2
@@ -934,11 +954,11 @@ if(part == 0) {
             collar();
 
 
-            up(50 * expand)
+            up(50 * (expand*1.5))
             up(base_h)
             for(angle = [0, 120, 240]) {
                 at_pinion(angle)
-                    sled_assembly(pionion_r=pinion_spin(angle), expand = expand);
+                    sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5));
             }
             
             up(50 * expand)
