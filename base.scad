@@ -34,6 +34,7 @@ pinion_teeth = 9;
 // < 17 teeth needs profile shift to avoid undercut; ring must use the same shift
 pinion_shift = auto_profile_shift(teeth=pinion_teeth);
 pinion_shaft_fit = 0.0; // added to the n20 D hole, 0 = nominal (press fit on X1C 0.2 nozzle), + looser, - tighter
+gear_z_offset=1; // height offset so gears dont un on sled surface
 
 
 //parts
@@ -279,7 +280,7 @@ module inner_collar_ring(e=0, notches=false)
 {
     render(convexity=10)
     tube(id=collar_od()-32-e*2, od=base_id+e*2, h=collar_h+3+e, 
-         chamfer=0.5, anchor=BOTTOM, $fn=512);
+         chamfer2=0.5, anchor=BOTTOM, $fn=512);
 }
 
 module collar() {
@@ -295,8 +296,9 @@ module collar() {
             // inner collar
             inner_collar_ring(notches=true);
                 
-            
-            ring_gear(mod=gear_mod, teeth=ring_gear_teeth , thickness=collar_gear_h, backing=10, profile_shift=pinion_shift,
+            up(gear_z_offset)
+                # ring_gear(mod=gear_mod, teeth=ring_gear_teeth , thickness=collar_gear_h, 
+                          backing=10, profile_shift=pinion_shift,
                 backlash=backlash, anchor=BOTTOM, $fn=512*LOD);
         }
     
@@ -337,25 +339,31 @@ module pinion(gear_spin=0) {
     collar_od = magnet_d+4;
     
     color("orange")
-    union() {
-        up(collar_gear_h)
-        //cyl(d=collar_od, h=magnet_offset, anchor=BOTTOM, $fn=128*LOD);
-        tube(id=magnet_d-2, od=collar_od, h=magnet_offset, ochamfer1=-0.5, 
-             anchor=BOTTOM, $fn=128*LOD);
+    difference() {
+        union() {
+            up(collar_gear_h)
+            //cyl(d=collar_od, h=magnet_offset, anchor=BOTTOM, $fn=128*LOD);
+            tube(id=magnet_d-2, od=collar_od, h=magnet_offset, ochamfer1=-0.5, 
+                 anchor=BOTTOM, $fn=128*LOD);
+            
         
-    
-        up(collar_gear_h+magnet_offset)
-        tube(id=magnet_d, od=collar_od, h=magnet_h, ochamfer2=0.25, 
-             anchor=BOTTOM, $fn=128*LOD);
-    
-        difference() {
+            up(collar_gear_h+magnet_offset)
+            tube(id=magnet_d, od=collar_od, h=magnet_h, ochamfer2=0.25, 
+                 anchor=BOTTOM, $fn=128*LOD);
+        
+            
+            up(gear_z_offset)
             spur_gear(mod=gear_mod, teeth=pinion_teeth, thickness=collar_gear_h,
                     profile_shift=pinion_shift, backlash=backlash,
                     gear_spin=gear_spin, anchor=BOTTOM, $fn=128*LOD);
+                    
+            // lower boss/collar
+            cyl(d=6, h=gear_z_offset, chamfer1=0.25, anchor=BOTTOM, $fn=128*LOD);
 
-            zrot(gear_spin)
-            pinion_shaft_hole(collar_gear_h);
-        }
+            }
+            
+        zrot(gear_spin)
+            pinion_shaft_hole(collar_gear_h+gear_z_offset);
     }
 }
 
@@ -735,7 +743,7 @@ module sled_assembly(pionion_r=0) {
 
 
 part = 0;
-slice_xz = false; // cut the assembly on the X/Z plane (y = 0, through the home switch plunger), keep +Y
+slice_xz = true; // cut the assembly on the X/Z plane (y = 0, through the home switch plunger), keep +Y
 
 // full assembly
 if(part == 0) {
