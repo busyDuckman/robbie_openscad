@@ -1,1 +1,6 @@
 *.stl
+
+# blender pipeline: generated exports, renders, blender save backups
+blender/build/
+blender/.output/
+*.blend1

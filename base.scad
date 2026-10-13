@@ -110,6 +110,8 @@ wire_channel_shift = 2; // move the channel off the fairing wall towards the pin
 fairing_t = 1.6;   // wall thickness
 fairing_fit = 1.0; // clearance to the ring gear tips
 
+top_sled_screw_l = 9; // 6g countersunk, sled_top to upper_sled (9 or 12)
+
 sled_tab_d = 3;    // upper / lower sled join tabs (helpers.scad join_tab_*)
 sled_tab_h = 1.2;
 
@@ -679,6 +681,12 @@ module upper_sled(pionion_r=0) {
         at_sled_holes()
             self_tap_hole(gauge=6, length=18, screw_type=my_screw_no_head,
                   hole_type=HOLE_SNUG, anchor=TOP);
+
+        // sled_top screws, 3 of the screw is in the sled_top
+        up(upper_sled_h)
+            at_top_sled_holes()
+                self_tap_hole(gauge=6, length=top_sled_screw_l - 3, screw_type=my_screw_no_head,
+                    hole_type=HOLE_SNUG, anchor=TOP);
         
     }
 }
@@ -854,20 +862,35 @@ module top_bearing(anchor=Front) {
     }
 }
 
+// sled_top to upper_sled screws: either side of the outer bearing, on the strip past the collar
+// ring channel (r 50.1 from the collar centre) to the sled's outer edge (r 125/2 - 3), midway across it
+module at_top_sled_holes() {
+    r = (50.1 + (collar_od() - 6)/2) / 2;
+    for (x = [-11.5, 11.5])
+        translate([x, pinion_dist() - sqrt(r*r - x*x), 0])
+            children();
+}
+
 module sled_top() {
     color("blue")
-    union() {
-        sled_shape(3, greater_d=collar_od()-6);
-        fwd(3)
-        up(3) 
-        {
-            // NOTE: the front / back anchors mean the gap is defined easily regardless of cyl(h)
-            top_bearing(anchor=FRONT);
-            fwd(10)  // gap
-            top_bearing(anchor=BACK);
+    difference() {
+        union() {
+            sled_shape(3, greater_d=collar_od()-6);
+            fwd(3)
+            up(3) 
+            {
+                // NOTE: the front / back anchors mean the gap is defined easily regardless of cyl(h)
+                top_bearing(anchor=FRONT);
+                fwd(10)  // gap
+                top_bearing(anchor=BACK);
+            }
         }
+
+        up(3)
+            at_top_sled_holes()
+                self_tap_hole(gauge=6, length=top_sled_screw_l, screw_type=my_screw,
+                    hole_type=HOLE_SNUG, anchor=TOP);
     }
-    
 }
 
 // ----------------------------------------------------------------------------------------
@@ -876,6 +899,18 @@ module sled_top() {
 // 6g x 16 countersunk, head top on z=0, shank down -Z
 module sled_screw() {
     no6_cs_screw(16);
+}
+
+// 6g countersunk, sled_top to upper_sled, head top on z=0, shank down -Z
+module top_sled_screw() {
+    no6_cs_screw(top_sled_screw_l);
+}
+
+// down through the sled_top into the upper sled, head flush with the sled_top's top face
+module at_top_sled_screws() {
+    up(upper_sled_z + upper_sled_h + 3)
+        at_top_sled_holes()
+            children();
 }
 
 // up through the lower sled into the upper sled, head flush with the lower sled's underside
@@ -938,6 +973,10 @@ module sled_assembly(pionion_r=0, expand = 0) {
     up(70 * expand)
     up(upper_sled_z + upper_sled_h)
         sled_top();
+
+    up(75 * expand)
+        at_top_sled_screws()
+            top_sled_screw();
 
     
     up(60 * expand)
