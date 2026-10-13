@@ -35,6 +35,8 @@ pinion_teeth = 9;
 pinion_shift = auto_profile_shift(teeth=pinion_teeth);
 pinion_shaft_fit = 0.0; // added to the n20 D hole, 0 = nominal (press fit on X1C 0.2 nozzle), + looser, - tighter
 gear_z_offset=1; // height offset so gears dont un on sled surface
+motor_shaft_gap = 0.5;   // n20 shaft tip below the magnet
+motor_pocket_fit = 0.1;  // snug pocket in the lower sled for the top of the n20 gearbox
 
 
 //parts
@@ -297,7 +299,7 @@ module collar() {
             inner_collar_ring(notches=true);
                 
             up(gear_z_offset)
-                # ring_gear(mod=gear_mod, teeth=ring_gear_teeth , thickness=collar_gear_h, 
+                ring_gear(mod=gear_mod, teeth=ring_gear_teeth , thickness=collar_gear_h, 
                           backing=10, profile_shift=pinion_shift,
                 backlash=backlash, anchor=BOTTOM, $fn=512*LOD);
         }
@@ -444,6 +446,9 @@ module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
 // ----------------------------------------------------------------------------------------
 // heights in the sled frame (z=0 at the collar bottom)
 function magnet_top() = collar_gear_h + magnet_offset + magnet_h;
+
+// n20 gearbox face (motor origin) height: shaft tip motor_shaft_gap under the magnet's bottom
+function motor_z() = collar_gear_h + magnet_offset - motor_shaft_gap - n20_shaft.z;
 function sensor_z() = magnet_top() + sensor_gap + as5600_chip_top(); // pcb back face, board is chip down
 
 // ----------------------------------------------------------------------------------------
@@ -691,7 +696,7 @@ module lower_sled(pionion_r=0) {
     render(convexity=10)
     difference() {
         union() {
-            sled_shape(lower_sled_h);
+            sled_shape(lower_sled_h, pinion_hole_d=n20_shaft.x + 0.4);
             down(fob_h)
                 lower_sled_fob(fob_h);
                 
@@ -701,6 +706,11 @@ module lower_sled(pionion_r=0) {
         // wire drop, under the fairing channel
         back(wire_channel_y())
         cuboid([wire_channel.x, wire_channel.y, 10]);
+
+        // snug pocket for the top of the n20 gearbox, up from the sled's underside,
+        // square cornered so the gearbox's rounded corners sit loose and only the flats locate it
+        up(motor_z() + lower_sled_h)
+            cuboid([n20_box.x + 2*motor_pocket_fit, n20_box.y + 2*motor_pocket_fit, n20_box.z + n20_can.z], anchor=TOP);
 
         // outer corners sit on the rotation surface, give them the same lead-in as the fob
         for (s = [-1, 1]) {
@@ -712,6 +722,10 @@ module lower_sled(pionion_r=0) {
             down(0.01)
             rolling_interface(sled_lead_in, lower_sled_h + 0.02, side_ang=side_ang);
         }
+        
+        //there is a colllar befor the motor caft, this allws clerance.
+        down(motor_z())
+        cyl(d=6, h=0.5, anchor=BOTTOM, $fn=64*LOD);
 
         at_sled_holes()
             yrot(180)
@@ -721,8 +735,8 @@ module lower_sled(pionion_r=0) {
 }
 
 module sled_assembly(pionion_r=0) {
-    down(lower_sled_h)
-        n20_motor();
+    //up(motor_z())
+        //n20_motor();
     pinion(gear_spin=pionion_r);
 
     down(lower_sled_h)
