@@ -1,6 +1,7 @@
 include <BOSL2/std.scad>
 include <BOSL2/gears.scad>
 include <BOSL2/rounding.scad>
+include <BOSL2/screws.scad>
 include <NopSCADlib/vitamins/stepper_motors.scad>
 include <NopSCADlib/vitamins/extrusions.scad>
 include <screw_holes.scad>
@@ -811,17 +812,30 @@ module lower_sled(pionion_r=0) {
 
 module top_bearing(anchor=Front) {
     axle_h = 4;
-    union() {
-    up(axle_h)
-        ycyl(d=10, h=7, chamfer=1, anchor=anchor, $fn=128*LOD);
-        adj = anchor == FRONT ? 1 : -1;
-        back(1 * adj) {
-            //cuboid([10, 7-2, 8], rounding=4, edges=[TOP+LEFT, TOP+RIGHT], 
-            //    anchor=anchor+BOTTOM,  $fn=64*LOD);
-            cuboid([10, 7-2, axle_h], rounding=-4, 
-                edges=[BOTTOM], //edges=[BOTTOM+LEFT, BOTTOM+RIGHT], 
-                anchor=anchor+BOTTOM,  $fn=128*LOD);
+    adj = anchor == FRONT ? 1 : -1;
+    difference() {
+        union() {
+        up(axle_h)
+            ycyl(d=10, h=7, chamfer=1, anchor=anchor, $fn=128*LOD);
+            back(1 * adj) {
+                //cuboid([10, 7-2, 8], rounding=4, edges=[TOP+LEFT, TOP+RIGHT],
+                //    anchor=anchor+BOTTOM,  $fn=64*LOD);
+                cuboid([10, 7-2, axle_h], rounding=-3,
+                    edges=[BOTTOM], //edges=[BOTTOM+LEFT, BOTTOM+RIGHT],
+                    anchor=anchor+BOTTOM,  $fn=128*LOD);
+            }
         }
+
+        // m3 x 25 machine screw through both, clearance
+        up(axle_h)
+            ycyl(d=3.4, h=20, $fn=32*LOD);
+
+        // m3 nut capture on the inner one's (FRONT anchored, +Y) outer face, a point up so it prints
+        if (anchor == FRONT)
+            translate([0, 7 + 0.01, axle_h])
+                xrot(-90)
+                    zrot(90)
+                        cyl(d=(5.5 + 0.3)/cos(30), h=3, anchor=TOP, $fn=6);
     }
 }
 
@@ -855,6 +869,18 @@ module sled_assembly(pionion_r=0) {
     
     up(upper_sled_z + upper_sled_h)
     sled_top();
+
+    // m3 x 25 through the top bearings (sled_top: up 3, axle 4 up), head on the outer face of the
+    // outer one (y = -3 - 10 - 7), nut in the inner one's trap (outer face y = -3 + 7)
+    up(upper_sled_z + upper_sled_h + 3 + 4) {
+        fwd(3 + 10 + 7)
+            xrot(90)
+                screw("M3", length=25, head="pan", drive="phillips", atype="shaft", anchor=TOP, $fn=24);
+        back(-3 + 7)
+            xrot(-90)
+                zrot(90)
+                    nut("M3", anchor=TOP, $fn=24);
+    }
     
     sensor();
     wire_harness();
