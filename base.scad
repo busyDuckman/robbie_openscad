@@ -4,6 +4,7 @@ include <NopSCADlib/vitamins/stepper_motors.scad>
 include <NopSCADlib/vitamins/extrusions.scad>
 include <screw_holes.scad>
 include <components.scad>
+include <helpers.scad>
 
 /*
 Vocab:
@@ -15,7 +16,7 @@ Vocab:
 // Globals
 // ----------------------------------------------------------------------------------------
 
-LOD = 0.5; //0.25;
+LOD = 1.0; //0.25;
 
 base_od = 150;
 base_id = 100;
@@ -104,6 +105,15 @@ fairing_fit = 1.0; // clearance to the ring gear tips
 // Geometry
 // ----------------------------------------------------------------------------------------
 
+// base / collar join tabs: between the screws, none at the home switch, so the collar only fits one way round
+module at_join_tabs() {
+    for (a = [0 : 360/8 : 359])
+        if (abs(posmod(a - home_switch_a + 180, 360) - 180) > 1)
+            zrot(a)
+                right(collar_holes_r())
+                    children();
+}
+
 module base() {
     chamf = (collar_od() - base_id)/2;
     
@@ -111,9 +121,16 @@ module base() {
     
     render(convexity=10)
     difference() {
-        // outer top chamfer: chamf in, base_chamfer_h down (tube() has no chamfer angle, so cyl minus bore)
-        cyl(d=base_od, h=base_h, chamfer2=chamf, chamfang2=atan(base_chamfer_h / chamf),
-            anchor=BOTTOM, $fn=512*LOD);
+        union() {
+            // outer top chamfer: chamf in, base_chamfer_h down (tube() has no chamfer angle, so cyl minus bore)
+            cyl(d=base_od, h=base_h, chamfer2=chamf, chamfang2=atan(base_chamfer_h / chamf),
+                anchor=BOTTOM, $fn=512*LOD);
+
+            // alignment for the collar
+            up(base_h - 0.01)
+                at_join_tabs()
+                    join_tab_male();
+        }
         cyl(d=base_id, h=3*base_h, $fn=512*LOD);
 
         xcyl(h=base_od/1.9, d=base_cable_dia, $fn=64*LOD, anchor=RIGHT);
@@ -288,6 +305,10 @@ module collar() {
             self_tap_hole(gauge=my_screw_gauge, length=25, screw_type=my_screw,
                   hole_type=HOLE_CLEARANCE, anchor=TOP, sink=5);
           //cyl(h=20, d=6, $fn=64*LOD, anchor=BOTTOM);
+
+        // alignment pits for the base's join tabs
+        at_join_tabs()
+            join_tab_female();
     }
           
 }
@@ -644,13 +665,29 @@ module at_rotation_surface(p, centre, inside) {
     children();
 }
 
+module engine_zip_tie_posts() {
+    union() {
+        difference() {
+            cyl(d=12, h=22, chamfer2=-2, anchor=TOP, $fn=64*LOD);
+            cuboid([30,10, 50], anchor=TOP);
+        }
+        
+        back(5)
+        cyl(d=3, h=22, chamfer2=-2, anchor=TOP, $fn=32*LOD);
+        fwd(5)
+        cyl(d=3, h=22, chamfer2=-2, anchor=TOP, $fn=32*LOD);
+    }
+}
+
 module lower_sled(pionion_r=0) {
     render(convexity=10)
     difference() {
         union() {
             sled_shape(lower_sled_h);
             down(fob_h)
-            lower_sled_fob(fob_h);
+                lower_sled_fob(fob_h);
+                
+            engine_zip_tie_posts();
         }
 
         // wire drop, under the fairing channel
@@ -697,20 +734,20 @@ module sled_assembly(pionion_r=0) {
 // ----------------------------------------------------------------------------------------
 
 
-part = 1;
+part = 0;
 slice_xz = false; // cut the assembly on the X/Z plane (y = 0, through the home switch plunger), keep +Y
 
 // full assembly
 if(part == 0) {
     difference() {
         union() {
-            base();
+            //base();
             position_home_switch()
                 d2f_switch(lever=false);
             #position_home_switch()
                 home_switch_plug();
-            //up(base_h)
-            //collar();
+            up(base_h)
+            collar();
 
 
 
