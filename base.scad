@@ -703,9 +703,11 @@ module lower_sled(pionion_r=0) {
             engine_zip_tie_posts();
         }
 
-        // wire drop, under the fairing channel
+        // wire drop, under the fairing channel, leaning 45 deg in towards the motor on the way down
         back(wire_channel_y())
-        cuboid([wire_channel.x, wire_channel.y, 10]);
+            up(lower_sled_h)
+                xrot(-45)
+                    cuboid([wire_channel.x, wire_channel.y, 10], rounding=0.5, edges="Z", $fn=16);
 
         // snug pocket for the top of the n20 gearbox, up from the sled's underside,
         // square cornered so the gearbox's rounded corners sit loose and only the flats locate it
