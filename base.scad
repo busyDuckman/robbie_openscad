@@ -870,6 +870,50 @@ module sled_top() {
     
 }
 
+// ----------------------------------------------------------------------------------------
+// hardware, drawn at its own origin, placed (sled frame) by its at_*()
+
+// 6g x 16 countersunk, head top on z=0, shank down -Z
+module sled_screw() {
+    no6_cs_screw(16);
+}
+
+// up through the lower sled into the upper sled, head flush with the lower sled's underside
+module at_sled_screws() {
+    down(lower_sled_h)
+        at_sled_holes()
+            yrot(180)
+                children();
+}
+
+// m3 x 25 pan head, head on z=0, shank down -Z
+module bearing_screw() {
+    screw("M3", length=25, head="pan", drive="phillips", atype="shaft", anchor=TOP, $fn=24);
+}
+
+// m3 nut, top face on z=0, body down -Z, a point along X
+module bearing_nut() {
+    nut("M3", anchor=TOP, $fn=24);
+}
+
+// through the top bearings (sled_top: up 3, axle 4 up), head on the outer face of the outer one
+// (y = -3 - 10 - 7), shank along +Y
+module at_bearing_screw() {
+    up(upper_sled_z + upper_sled_h + 3 + 4)
+        fwd(3 + 10 + 7)
+            xrot(90)
+                children();
+}
+
+// in the inner bearing's trap (outer face y = -3 + 7), a point up
+module at_bearing_nut() {
+    up(upper_sled_z + upper_sled_h + 3 + 4)
+        back(-3 + 7)
+            xrot(-90)
+                zrot(90)
+                    children();
+}
+
 module sled_assembly(pionion_r=0, expand = 0) {
     up(motor_z())
         n20_motor();
@@ -881,12 +925,9 @@ module sled_assembly(pionion_r=0, expand = 0) {
     down(lower_sled_h)
      lower_sled();
 
-    // 6g x 16 countersunk, up through the lower sled into the upper sled
     up(10 * expand)
-    down(lower_sled_h)
-        at_sled_holes()
-            yrot(180)
-                no6_cs_screw(16);
+        at_sled_screws()
+            sled_screw();
     
     
     up(50 * expand)
@@ -902,17 +943,11 @@ module sled_assembly(pionion_r=0, expand = 0) {
     up(60 * expand)
     sensor();
     
-    // m3 x 25 through the top bearings (sled_top: up 3, axle 4 up), head on the outer face of the
-    // outer one (y = -3 - 10 - 7), nut in the inner one's trap (outer face y = -3 + 7)
-    up(80 * expand)
-    up(upper_sled_z + upper_sled_h + 3 + 4) {
-        fwd(3 + 10 + 7)
-            xrot(90)
-                screw("M3", length=25, head="pan", drive="phillips", atype="shaft", anchor=TOP, $fn=24);
-        back(-3 + 7)
-            xrot(-90)
-                zrot(90)
-                    nut("M3", anchor=TOP, $fn=24);
+    up(80 * expand) {
+        at_bearing_screw()
+            bearing_screw();
+        at_bearing_nut()
+            bearing_nut();
     }
     
     
@@ -930,11 +965,12 @@ module guide() {
 // Render
 // ----------------------------------------------------------------------------------------
 part = 0;
-expand = $t; //0.5;     // 0 = assembeld, 0.5 = base expanded only, 1.0 = fully expanded. Can be animated.
+expand = 1; //0.5;     // 0 = assembeld, 0.5 = base expanded only, 1.0 = fully expanded. Can be animated.
 slice_mode = 0; // cut the assembly: 0 none
                 //   1 X/Z plane (y = 0, through the home switch plunger), keep +Y
                 //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
                 //   3 both 1 and 2
+print_layout=true;
 
 // full assembly
 if(part == 0) {
@@ -958,7 +994,7 @@ if(part == 0) {
             up(base_h)
             for(angle = [0, 120, 240]) {
                 at_pinion(angle)
-                    sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5));
+                    sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5)*2);
             }
             
             up(50 * expand)
@@ -975,31 +1011,103 @@ if(part == 0) {
     }
 }
 
-if(part == 1) {
-    base();
+// ----------------------------------------------------------------------------------------
+// single parts, for export
+//   positive: printed, negative: bought / not printed
+//   raw, as modelled at the part's own origin, or print_layout = true to turn printed parts for the bed
+//
+//   100+: misc setups (sub assemblies, test prints)
+//
+//    1 base               -1 d2f switch           100 sled assembly
+//    2 collar             -3 n20 motor            101 base test slice (home switch pocket)
+//    3 guide              -4 as5600 board
+//    4 pinion             -5 bearing screw (m3 x 25)
+//    6 home switch plug   -6 bearing nut (m3)
+//    7 lower sled         -7 sled screws (6g x 16)
+//    8 upper sled         -8 wire harness
+//    9 sled top
+
+// printed parts: on the bed when print_layout (turned xrot then yrot, then lifted onto z=0), raw otherwise
+module print_layout(xrot=0, yrot=0, lift=0) {
+    if (print_layout)
+        up(lift)
+            yrot(yrot)
+                xrot(xrot)
+                    children();
+    else
+        children();
 }
 
-if(part == 2) {
-    collar();
+if(part == 1)
+    print_layout()
+        base();
+
+if(part == 2)
+    print_layout()
+        collar();
+
+// centred tube
+if(part == 3)
+    print_layout(lift=3/2)
+        guide();
+
+if(part == 4)
+    print_layout()
+        pinion();
+
+// top face down (switch frame +Y is up)
+if(part == 6)
+    print_layout(xrot=-90, lift=base_h - home_switch_z())
+        home_switch_plug();
+
+// top face down, join tab pits on the bed
+if(part == 7)
+    print_layout(xrot=180, lift=lower_sled_h)
+        lower_sled();
+
+// plate top down, join tabs pointing up
+if(part == 8)
+    print_layout(xrot=180, lift=upper_sled_h)
+        upper_sled();
+
+if(part == 9)
+    print_layout()
+        sled_top();
+
+if(part == -1) {
+    d2f_switch(lever=false);
 }
 
-if(part == 4) {
-    pinion();
+if(part == -3) {
+    n20_motor();
 }
 
-if(part == 5) {
+if(part == -4) {
+    as5600_board();
+}
+
+if(part == -5) {
+    bearing_screw();
+}
+
+if(part == -6) {
+    bearing_nut();
+}
+
+if(part == -7) {
+    sled_screw();
+}
+
+if(part == -8) {
+    wire_harness();
+}
+
+if(part == 100) {
     sled_assembly();
 }
 
-// home switch plug, top face down on the bed
-if(part == 6) {
-    up(base_h - home_switch_z())
-        xrot(-90) // switch frame +Y (up) -> -Z, top face down
-            home_switch_plug();
-}
-
 // test print: just the base around the home switch pocket, for fitting the switch and plug
-if(part == -2) {
+if(part == 101) {
     test = [25, 30, 15]; // radial (from the bore), tangential, height (down from the base top)
 
     //down(base_h - test.z) left(base_id/2 - 1)
@@ -1015,12 +1123,6 @@ if(part == -2) {
 }
 
 
-// Demos and tests
-
-if(part == -2) {
-  // just the secion of the base with the mico pocket and the plug. 
-  // layed out for 3d printing
-}
 
 
 
