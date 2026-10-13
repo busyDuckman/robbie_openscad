@@ -1,5 +1,6 @@
 include <BOSL2/std.scad>
 include <BOSL2/gears.scad>
+include <BOSL2/rounding.scad>
 include <NopSCADlib/vitamins/stepper_motors.scad>
 include <NopSCADlib/vitamins/extrusions.scad>
 include <screw_holes.scad>
@@ -16,7 +17,7 @@ Vocab:
 // Globals
 // ----------------------------------------------------------------------------------------
 
-LOD = 1.0; // 0.25 for speed, 1.0 for checks, 2.0 for prints;
+LOD = 0.5; // 0.25 for speed, 1.0 for checks, 2.0 for prints;
 
 base_od = 150;
 base_id = 100;
@@ -25,7 +26,7 @@ base_h = 40;
 base_chamfer_h = 15;    // vertical drop of the outer top chamfer (horizontal is set by the collar od)
 
 guide_id = 20;
-guide_h = 15;
+guide_h = 10;
 
 collar_h = 10;
 collar_gear_h = 8;
@@ -79,6 +80,7 @@ home_switch_wire_w = 10;     // wire channel width (along the wall), drops strai
 home_switch_ledge_h = 6;     // depth of the ledges under the plug's fingers (they're 3.5 deep, so ~60 deg underside)
 
 upper_sled_z = 10; // upper sled bottom above the collar bottom
+upper_sled_h = 6;  
 lower_sled_h = 3;  // lower sled thickness, hangs below the collar bottom
 
 fob_h = 10;         // post under the lower sled
@@ -507,14 +509,55 @@ module sensor_guard() {
     tube(id=guard_id, od=guard_id + 2*guard_t, h=sensor_standoff - guard_gap, anchor=BOTTOM, $fn=64*LOD);
 }
 
-// wires dropped straight down the channel, from the pocket floor to below the motor
-module sensor_wires() {
-    top = sensor_floor_z() + wire_d/2;
-    bottom = -3 - n20_box.z - n20_can.z;
-    for (i = [0 : wire_n - 1])
-        color(["red", "black", "yellow", "green", "blue", "white"][i % 6])
-        translate([(i - (wire_n - 1)/2) * wire_d, wire_channel_y(), bottom])
-        cyl(d=wire_d, h=top - bottom, anchor=BOTTOM, $fn=12);
+// round wire along a path of points, corners curved (bend, capped to half the shorter neighbour segment)
+module wire_path(pts, bend=10) {
+    joints = [for (k = [0 : len(pts) - 1])
+                 k == 0 || k == len(pts) - 1 ? 0
+                 : min(bend, norm(pts[k] - pts[k - 1])/2, norm(pts[k + 1] - pts[k])/2)];
+    path = round_corners(pts, method="smooth", joint=joints, closed=false, $fn=16);
+
+    for (i = [0 : len(path) - 2])
+        hull() {
+            translate(path[i])
+                sphere(d=wire_d, $fn=8);
+            translate(path[i + 1])
+                sphere(d=wire_d, $fn=8);
+        }
+}
+
+// 6 wire harness, in the sled frame, one row along X, motor wires on the ends, sensor vcc, gnd, sda, scl between
+//   sensor wires: down the channel and the lower sled's 45 deg drop, then down the +Y zip tie post
+//   motor wires: off the end cap, out to the same post and up beside them
+//   the row runs in over the guide, drops through it and stops 5 under it
+module wire_harness() {
+    n = wire_n + 2;
+    colours = ["blue", "red", "black", "yellow", "green", "white"];
+
+    post_y = 5 + 3/2 + wire_d/2;                 // beside the +Y zip tie post (d3 at y=5)
+    run_z = guide_h + 3/2 - base_h + 0.5 + wire_d/2; // just over the guide (3 thick, centred on guide_h)
+    drop_y = pinion_dist() - 5;                  // drops through the guide 5 off the centre
+    end_z = guide_h - 3/2 - 5 - base_h;          // 5 under the guide
+    end_cap_z = motor_z() - n20_box.z - n20_can.z;
+
+    for (j = [0 : n - 1]) {
+        x = (j - (n - 1)/2) * wire_d;
+        motor = j == 0 || j == n - 1;
+
+        sled_pts = motor
+            ? [[x, 2, end_cap_z + 0.5],
+               [x, 2, end_cap_z - 1.5],
+               [x, post_y, end_cap_z - 1.5],
+               [x, post_y, run_z]]
+            : [[x, wire_channel_y(), sensor_floor_z() + wire_d/2],
+               [x, wire_channel_y(), 0],
+               [x, post_y, -(wire_channel_y() - post_y)],
+               [x, post_y, run_z]];
+
+        color(colours[j])
+        wire_path(concat(sled_pts,
+                         [[x, drop_y, run_z],
+                          [x, drop_y, end_z]]));
+    }
 }
 
 
@@ -556,7 +599,7 @@ module at_sled_holes(pionion_r=0) {
 module upper_sled(pionion_r=0) {
     difference() {
         union() {
-            sled_shape(6, greater_d=collar_od()-6, pinion_hole_d=10);
+            sled_shape(upper_sled_h, greater_d=collar_od()-6, pinion_hole_d=10);
             at_sled_holes()
                 cyl(d=6, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
             down(upper_sled_z) {
@@ -766,6 +809,38 @@ module lower_sled(pionion_r=0) {
     }
 }
 
+module top_bearing(anchor=Front) {
+    axle_h = 4;
+    union() {
+    up(axle_h)
+        ycyl(d=10, h=7, chamfer=1, anchor=anchor, $fn=128*LOD);
+        adj = anchor == FRONT ? 1 : -1;
+        back(1 * adj) {
+            //cuboid([10, 7-2, 8], rounding=4, edges=[TOP+LEFT, TOP+RIGHT], 
+            //    anchor=anchor+BOTTOM,  $fn=64*LOD);
+            cuboid([10, 7-2, axle_h], rounding=-4, 
+                edges=[BOTTOM], //edges=[BOTTOM+LEFT, BOTTOM+RIGHT], 
+                anchor=anchor+BOTTOM,  $fn=128*LOD);
+        }
+    }
+}
+
+module sled_top() {
+    color("blue")
+    union() {
+        sled_shape(3, greater_d=collar_od()-6);
+        fwd(3)
+        up(3) 
+        {
+            // NOTE: the front / back anchors mean the gap is defined easily regardless of cyl(h)
+            top_bearing(anchor=FRONT);
+            fwd(10)  // gap
+            top_bearing(anchor=BACK);
+        }
+    }
+    
+}
+
 module sled_assembly(pionion_r=0) {
     up(motor_z())
         n20_motor();
@@ -775,11 +850,14 @@ module sled_assembly(pionion_r=0) {
     lower_sled();
     
     
-    up(upper_sled_z)
-    #upper_sled(pionion_r);
+    //up(upper_sled_z)
+    //upper_sled(pionion_r);
+    
+    up(upper_sled_z + upper_sled_h)
+    sled_top();
     
     sensor();
-    sensor_wires();
+    wire_harness();
 }
 
 
