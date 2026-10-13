@@ -11,6 +11,7 @@ Use include <components.scad> so the size variables come through.
 n20_box = [12, 10, 9];      // gearbox width, height, length
 n20_can = [12, 10, 15.2];   // can diameter, across flats, length (incl. end cap)
 n20_shaft = [3, 2.5, 10];   // diameter, across flat, length (length not on drawing, measure)
+n20_shaft_d_len = 5;        // only the last 5mm of the shaft has the D flat
 
 // clearance grows the gearbox and can (not the shaft) for use as a cutter
 module n20_motor(clearance=0) {
@@ -28,12 +29,13 @@ module n20_motor(clearance=0) {
         cuboid([n20_can.x + 2*c, n20_can.y + 2*c, n20_can.z], anchor=TOP);
     }
 
-    // D shaft, flat on +Y
+    // shaft, round, then D (flat on +Y) for the last n20_shaft_d_len
     color("lightgray")
-    intersection() {
+    difference() {
         cyl(d=n20_shaft.x, h=n20_shaft.z, anchor=BOTTOM, $fn=64);
-        fwd((n20_shaft.x - n20_shaft.y)/2)
-        cuboid([n20_shaft.x, n20_shaft.y, n20_shaft.z], anchor=BOTTOM);
+        up(n20_shaft.z - n20_shaft_d_len)
+            back(n20_shaft.x/2 - (n20_shaft.x - n20_shaft.y))
+                cuboid([n20_shaft.x, n20_shaft.x, n20_shaft.z], anchor=FRONT+BOTTOM);
     }
 }
 

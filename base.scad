@@ -16,13 +16,16 @@ Vocab:
 // Globals
 // ----------------------------------------------------------------------------------------
 
-LOD = 1.0; //0.25;
+LOD = 1.0; // 0.25 for speed, 1.0 for checks, 2.0 for prints;
 
 base_od = 150;
 base_id = 100;
 base_cable_dia = 12;
 base_h = 40;
 base_chamfer_h = 15;    // vertical drop of the outer top chamfer (horizontal is set by the collar od)
+
+guide_id = 20;
+guide_h = 15;
 
 collar_h = 10;
 collar_gear_h = 8;
@@ -102,6 +105,9 @@ wire_channel_shift = 2; // move the channel off the fairing wall towards the pin
 
 fairing_t = 1.6;   // wall thickness
 fairing_fit = 1.0; // clearance to the ring gear tips
+
+sled_tab_d = 3;    // upper / lower sled join tabs (helpers.scad join_tab_*)
+sled_tab_h = 1.2;
 
 
 // ----------------------------------------------------------------------------------------
@@ -282,7 +288,7 @@ module inner_collar_ring(e=0, notches=false)
 {
     render(convexity=10)
     tube(id=collar_od()-32-e*2, od=base_id+e*2, h=collar_h+3+e, 
-         chamfer2=0.5, anchor=BOTTOM, $fn=512);
+         chamfer2=0.5, anchor=BOTTOM, $fn=512*LOD);
 }
 
 module collar() {
@@ -366,6 +372,10 @@ module pinion(gear_spin=0) {
             
         zrot(gear_spin)
             pinion_shaft_hole(collar_gear_h+gear_z_offset);
+
+        // round part of the shaft, up to where its D flat starts
+        down(0.01)
+            cyl(d=n20_shaft.x + pinion_shaft_fit, h=motor_z() + n20_shaft.z - n20_shaft_d_len + 0.01, anchor=BOTTOM, $fn=64*LOD);
     }
 }
 
@@ -528,6 +538,14 @@ module fairing() {
 // ----------------------------------------------------------------------------------------
 
 // position at the bolr holes
+// upper / lower sled join tabs, on the fairing either side of the conduit, centres in from the outer edge
+module at_sled_tabs() {
+    for (a = [45, 135])
+        zrot(a)
+            right(33/2 - 3)
+                children();
+}
+
 module at_sled_holes(pionion_r=0) {
     //fwd(5)
     for (side=[-1, 1])
@@ -546,8 +564,16 @@ module upper_sled(pionion_r=0) {
                 wire_conduit();
                 sensor_stilts();
                 sensor_guard();
+
+                // pads thickening the fairing round the tab pits
+                at_sled_tabs()
+                    cyl(d=6, h=upper_sled_z, anchor=BOTTOM, $fn=32*LOD);
             }
         }
+
+        down(upper_sled_z)
+            at_sled_tabs()
+                join_tab_female(d=sled_tab_d, h=sled_tab_h);
 
         // ring is centred on the collar centre, which is +Y pinion_dist() in the sled frame
         back(pinion_dist())
@@ -701,6 +727,10 @@ module lower_sled(pionion_r=0) {
                 lower_sled_fob(fob_h);
                 
             engine_zip_tie_posts();
+
+            up(lower_sled_h)
+                at_sled_tabs()
+                    join_tab_male(d=sled_tab_d, h=sled_tab_h);
         }
 
         // wire drop, under the fairing channel, leaning 45 deg in towards the motor on the way down
@@ -737,35 +767,42 @@ module lower_sled(pionion_r=0) {
 }
 
 module sled_assembly(pionion_r=0) {
-    //up(motor_z())
-        //n20_motor();
+    up(motor_z())
+        n20_motor();
     pinion(gear_spin=pionion_r);
 
     down(lower_sled_h)
     lower_sled();
     
     
-    //up(upper_sled_z)
-    //upper_sled(pionion_r);
+    up(upper_sled_z)
+    #upper_sled(pionion_r);
     
-    //sensor();
-    //sensor_wires();
+    sensor();
+    sensor_wires();
 }
 
 
 // ----------------------------------------------------------------------------------------
+module guide() {
+    t = 3.0;
+    tube(id = guide_id , od=guide_id +t+t, h=t, chamfer=0.25, $fn=128*LOD);
+}
+
+// ----------------------------------------------------------------------------------------
 // Render
 // ----------------------------------------------------------------------------------------
-
-
 part = 0;
-slice_xz = true; // cut the assembly on the X/Z plane (y = 0, through the home switch plunger), keep +Y
+slice_mode = 0; // cut the assembly: 0 none
+                //   1 X/Z plane (y = 0, through the home switch plunger), keep +Y
+                //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
+                //   3 both 1 and 2
 
 // full assembly
 if(part == 0) {
     difference() {
         union() {
-            //base();
+            base();
             position_home_switch()
                 d2f_switch(lever=false);
             #position_home_switch()
@@ -774,21 +811,22 @@ if(part == 0) {
             collar();
 
 
-
             up(base_h)
             for(angle = [0, 120, 240]) {
                 at_pinion(angle)
                     sled_assembly(pionion_r=pinion_spin(angle));
-                // pinion_at(angle);
             }
-
-            // 25mm cube for scale
-            //right(base_od/2 + 10)
-                //cuboid(25, anchor=BOTTOM);
+            
+            up(guide_h)
+                guide();
         }
 
-        if (slice_xz)
+        if (slice_mode == 1 || slice_mode == 3)
             cuboid([400, 400, 400], anchor=BACK);
+
+        if (slice_mode == 2 || slice_mode == 3)
+            zrot(30)
+                cuboid([400, 400, 400], anchor=BACK);
     }
 }
 
