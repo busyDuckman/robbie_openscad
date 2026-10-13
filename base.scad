@@ -593,7 +593,7 @@ module at_sled_tabs() {
 module at_sled_holes(pionion_r=0) {
     //fwd(5)
     for (side=[-1, 1])
-        left(13 * side)
+        left(12.5 * side)
             children();
 }
 
@@ -602,7 +602,7 @@ module upper_sled(pionion_r=0) {
         union() {
             sled_shape(upper_sled_h, greater_d=collar_od()-6, pinion_hole_d=10);
             at_sled_holes()
-                cyl(d=6, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
+                cyl(d=5.5, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
             down(upper_sled_z) {
                 fairing();
                 wire_conduit();
@@ -612,12 +612,13 @@ module upper_sled(pionion_r=0) {
                 // pads thickening the fairing round the tab pits
                 at_sled_tabs()
                     cyl(d=6, h=upper_sled_z, anchor=BOTTOM, $fn=32*LOD);
+
+                // join tabs, pointing down into the lower sled
+                at_sled_tabs()
+                    zflip()
+                        join_tab_male(d=sled_tab_d, h=sled_tab_h);
             }
         }
-
-        down(upper_sled_z)
-            at_sled_tabs()
-                join_tab_female(d=sled_tab_d, h=sled_tab_h);
 
         // ring is centred on the collar centre, which is +Y pinion_dist() in the sled frame
         back(pinion_dist())
@@ -664,7 +665,7 @@ module upper_sled(pionion_r=0) {
                
         up(2)
         at_sled_holes()
-            self_tap_hole(gauge=4, length=18, screw_type=my_screw_no_head,
+            self_tap_hole(gauge=6, length=18, screw_type=my_screw_no_head,
                   hole_type=HOLE_SNUG, anchor=TOP);
         
     }
@@ -771,11 +772,13 @@ module lower_sled(pionion_r=0) {
                 lower_sled_fob(fob_h);
                 
             engine_zip_tie_posts();
-
-            up(lower_sled_h)
-                at_sled_tabs()
-                    join_tab_male(d=sled_tab_d, h=sled_tab_h);
         }
+
+        // pits for the upper sled's join tabs
+        up(lower_sled_h)
+            at_sled_tabs()
+                zflip()
+                    join_tab_female(d=sled_tab_d, h=sled_tab_h);
 
         // wire drop, under the fairing channel, leaning 45 deg in towards the motor on the way down
         back(wire_channel_y())
@@ -805,7 +808,7 @@ module lower_sled(pionion_r=0) {
 
         at_sled_holes()
             yrot(180)
-                self_tap_hole(gauge=4, length=18, screw_type=my_screw,
+                self_tap_hole(gauge=6, length=18, screw_type=my_screw,
                     hole_type=HOLE_SNUG, anchor=TOP);
     }
 }
@@ -855,23 +858,33 @@ module sled_top() {
     
 }
 
-module sled_assembly(pionion_r=0) {
+module sled_assembly(pionion_r=0, expand = 0) {
     up(motor_z())
         n20_motor();
+        
+    up(35 * expand)
     pinion(gear_spin=pionion_r);
 
+    up(30 * expand)
     down(lower_sled_h)
-    lower_sled();
+     lower_sled();
     
     
-    //up(upper_sled_z)
-    //upper_sled(pionion_r);
+    up(50 * expand)
+    up(upper_sled_z)
+        upper_sled(pionion_r);
     
+    up(70 * expand)
     up(upper_sled_z + upper_sled_h)
-    sled_top();
+        sled_top();
 
+    
+    up(60 * expand)
+    sensor();
+    
     // m3 x 25 through the top bearings (sled_top: up 3, axle 4 up), head on the outer face of the
     // outer one (y = -3 - 10 - 7), nut in the inner one's trap (outer face y = -3 + 7)
+    up(80 * expand)
     up(upper_sled_z + upper_sled_h + 3 + 4) {
         fwd(3 + 10 + 7)
             xrot(90)
@@ -882,7 +895,7 @@ module sled_assembly(pionion_r=0) {
                     nut("M3", anchor=TOP, $fn=24);
     }
     
-    sensor();
+    
     wire_harness();
 }
 
@@ -897,7 +910,8 @@ module guide() {
 // Render
 // ----------------------------------------------------------------------------------------
 part = 0;
-slice_mode = 0; // cut the assembly: 0 none
+expand = 0;     // 0 = assembeld, 1.0 = fully expanded. Can be animated.
+slice_mode = 1; // cut the assembly: 0 none
                 //   1 X/Z plane (y = 0, through the home switch plunger), keep +Y
                 //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
                 //   3 both 1 and 2
@@ -907,20 +921,27 @@ if(part == 0) {
     difference() {
         union() {
             base();
+            up(11 * expand)
             position_home_switch()
                 d2f_switch(lever=false);
-            #position_home_switch()
+            
+            up(18 * expand)
+            position_home_switch()
                 home_switch_plug();
+                
+            up(20 * expand)
             up(base_h)
             collar();
 
 
+            up(50 * expand)
             up(base_h)
             for(angle = [0, 120, 240]) {
                 at_pinion(angle)
-                    sled_assembly(pionion_r=pinion_spin(angle));
+                    sled_assembly(pionion_r=pinion_spin(angle), expand = expand);
             }
             
+            up(50 * expand)
             up(guide_h)
                 guide();
         }
