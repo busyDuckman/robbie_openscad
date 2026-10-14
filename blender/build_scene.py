@@ -58,6 +58,8 @@ PARTS = {
     "sensor": "pcb",
     "sled_screw": "metal",
     "top_sled_screw": "metal",
+    "magnet": "metal",
+    "sled_pin": "printed",
     "bearing_screw": "metal",
     "bearing_nut": "metal",
     "wire_harness": "wire",
@@ -65,20 +67,33 @@ PARTS = {
 
 EXPAND_SAMPLES = [i / 10 for i in range(11)]
 
-FPS = 30
-HOLD_START = 20      # frames assembled before the explode
-EXPLODE = 150        # frames for expand 0 -> 1 (linear, as $t)
-HOLD_END = 50        # frames fully exploded
-ORBIT_DEG = 70       # camera turn over the whole clip
+FPS = 25
+# timeline, seconds. The clip ends as it starts, so it loops.
+T_HOLD = 0.4         # assembled
+T_EXPLODE = 2.5      # expand 0 -> 1 (linear, as $t), camera turns ORBIT_DEG
+T_DETAIL = 4.0       # exploded, camera turns on round to 360 and moves in on the sleds
+T_REASSEMBLE = 2.0   # expand 1 -> 0, camera back to its start, no turning
+T_SPIN = 8.0         # sleds run round the ring SPIN_DEG, faded parts see-through
+T_FADE = 0.8         # fade in / out time, inside T_SPIN
+ORBIT_DEG = 70       # camera turn during the explode
+SPIN_DEG = 360       # sled travel, a whole turn so the loop is seamless
 CAM_ELEVATION = 22   # degrees
 CAM_LENS = 85        # mm
+DETAIL_ZOOM = 0.5    # camera distance in the detail orbit, vs the exploded fit
+
+# see-through while the sleds turn (opacity FADE_OPACITY), so the gears show
+FADE_PARTS = ["upper_sled", "sled_top", "sensor", "sled_screw", "top_sled_screw", "bearing_screw", "bearing_nut",
+              "sled_pin"]
+FADE_OPACITY = 0.1
+# parts that also spin on their own axis as the sleds turn: ratio of the turn, from the scad (echoed)
+SPIN_PARTS = {"pinion": "-ring_gear_teeth / pinion_teeth"}
 
 SCALE = 0.001        # scad mm -> blender m
 MARKER_COLOUR = "#0A0B0C"  # placement markers, picked out of exports that also hold unlisted parts
 
 # printed parts with no color() in the scad (OpenSCAD's default yellow)
 PRINTED_DEFAULT = "#E6E6E3"
-PCB_SOLDERMASK = "#1F3F8F"   # the as5600 board is white in the scad
+PCB_SOLDERMASK = "#F4F4F2"   # gloss white
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -155,7 +170,8 @@ def write_drivers(lod):
            "use <orig.scad>",
            'blender_sel = "";',
            "blender_marker = false;",
-           f'module blender_marker_shape() color("{MARKER_COLOUR}") cube(0.5, center=true);', ""]
+           f'module blender_marker_shape() color("{MARKER_COLOUR}") cube(0.5, center=true);']
+    drv += [f'echo(str("blender_spin {n}=", {e}));' for n, e in SPIN_PARTS.items()] + [""]
     for name in PARTS:
         if name not in sigs:
             raise SystemExit(f"build_scene: module {name}() not found in {REPO}/*.scad, update PARTS")
@@ -185,19 +201,32 @@ def openscad(out, sel, expand, lod, marker=False):
     r = subprocess.run(args, capture_output=True, text=True, cwd=BUILD)
     log = r.stdout + r.stderr
     if "Current top level object is empty" in log and "ERROR:" not in log:
-        return False
+        return False, log
     if r.returncode != 0 or "ERROR:" in log:
         raise RuntimeError(f"openscad failed for {sel} @ {expand}:\n{log}")
-    return os.path.exists(out)
+    return os.path.exists(out), log
 
 
-def marker_bbox(path):
+def marker_points(path):
     v, t, c, colours = read_3mf(path)
     ids = [i for i, (_, h) in enumerate(colours) if h == MARKER_COLOUR]
-    a = v[t[np.isin(c, ids)].ravel()]
-    if len(a) == 0:
-        return None
-    return a.min(0).tolist(), a.max(0).tolist()
+    return v[t[np.isin(c, ids)].ravel()]
+
+
+def clusters(a, r=2.0):
+    """centres of the separate marker cubes (one per copy of the part)"""
+    groups = []
+    for p in a:
+        for g in groups:
+            if np.abs(g[0] - p).max() < r:
+                g.append(p)
+                break
+        else:
+            groups.append([p])
+    return [((np.min(g, 0) + np.max(g, 0)) / 2).tolist() for g in groups]
+
+
+EXPORT_VERSION = 2  # bump when the export code changes
 
 
 def source_hash(lod):
@@ -205,8 +234,7 @@ def source_hash(lod):
     for f in sorted(os.listdir(REPO)):
         if f.endswith(".scad"):
             h.update(f.encode() + open(os.path.join(REPO, f), "rb").read())
-    h.update(open(__file__, "rb").read())
-    h.update(repr((lod, EXPAND_SAMPLES, OPENSCAD)).encode())
+    h.update(repr((lod, EXPAND_SAMPLES, OPENSCAD, PARTS, SPIN_PARTS, MARKER_COLOUR, EXPORT_VERSION)).encode())
     return h.hexdigest()
 
 
@@ -236,7 +264,7 @@ def export_all(lod, force):
         print(f"build_scene: {len(jobs)} OpenSCAD exports ...")
         done = {k: f.result() for k, f in jobs.items()}
 
-        rest = done[("geom", "__rest__")]
+        rest = done[("geom", "__rest__")][0]
         if rest:
             for i, e in enumerate(EXPAND_SAMPLES):
                 jobs[("rest", i)] = ex.submit(openscad, os.path.join(mdir, f"__rest___{i:02d}.3mf"),
@@ -246,14 +274,21 @@ def export_all(lod, force):
 
     parts = {}
     for name in PARTS:
-        if not done[("geom", name)]:
+        if not done[("geom", name)][0]:
             print(f"build_scene: WARNING {name}() draws nothing in the assembly, skipped")
             continue
-        boxes = []
+        boxes, centres = [], []
         for i in range(len(EXPAND_SAMPLES)):
-            f = os.path.join(mdir, f"{name}_{i:02d}.3mf")
-            boxes.append(marker_bbox(f) if done[("mark", name, i)] else None)
-        parts[name] = {"kind": PARTS[name], "geom": f"geom/{name}.3mf", "boxes": boxes}
+            a = marker_points(os.path.join(mdir, f"{name}_{i:02d}.3mf")) if done[("mark", name, i)][0] else []
+            boxes.append([a.min(0).tolist(), a.max(0).tolist()] if len(a) else None)
+            if i == 0 and len(a):
+                centres = clusters(a)
+        parts[name] = {"kind": PARTS[name], "geom": f"geom/{name}.3mf", "boxes": boxes, "centres": centres}
+        if name in SPIN_PARTS:
+            m = re.search(rf"blender_spin {name}=([-\d.eE+]+)", done[("geom", name)][1])
+            if not m:
+                raise SystemExit(f"build_scene: no spin ratio echoed for {name}, check SPIN_PARTS")
+            parts[name]["spin"] = float(m.group(1))
 
     if rest:
         print("build_scene: WARNING the assembly has geometry outside PARTS (a new part?), "
@@ -262,7 +297,7 @@ def export_all(lod, force):
         for i in range(len(EXPAND_SAMPLES)):
             v, _, _, _ = read_3mf(os.path.join(mdir, f"__rest___{i:02d}.3mf"))
             boxes.append([v.min(0).tolist(), v.max(0).tolist()])
-        parts["_unlisted"] = {"kind": "printed", "geom": "geom/__rest__.3mf", "boxes": boxes}
+        parts["_unlisted"] = {"kind": "printed", "geom": "geom/__rest__.3mf", "boxes": boxes, "centres": []}
 
     p = {"key": key, "lod": lod, "samples": EXPAND_SAMPLES, "parts": parts}
     json.dump(p, open(pfile, "w"), indent=1)
@@ -367,7 +402,7 @@ def material_for(kind, cname, chex):
         elif black:
             set_inputs(b, base=srgb("#141414"), rough=0.45)
         elif chex == "#FFFFFF" or default:
-            set_inputs(b, base=srgb(PCB_SOLDERMASK), rough=0.3, coat=0.6)
+            set_inputs(b, base=srgb(PCB_SOLDERMASK), rough=0.12, coat=1.0)
         else:  # tinned leads
             set_inputs(b, base=srgb("#C8C8C8"), metal=1, rough=0.3)
     elif kind in ("metal", "motor", "switch"):
@@ -409,45 +444,131 @@ def clear_collection(c):
                 bpy.data.meshes.remove(data)
 
 
-def frame_of(i, n):
-    return HOLD_START + 1 + round(EXPLODE * i / (n - 1))
+def timeline():
+    """frames: start, explode start, explode end, detail end, reassembled, spin end (= start, loops)"""
+    t = np.cumsum([0, T_HOLD, T_EXPLODE, T_DETAIL, T_REASSEMBLE, T_SPIN])
+    return [1 + round(x * FPS) for x in t]
+
+
+def lin(a, b, i, n):
+    return a + round((b - a) * i / (n - 1))
+
+
+def key(ob, path, value, frame, interp, index=-1):
+    bpy.context.preferences.edit.keyframe_new_interpolation_type = interp
+    if path.startswith('["'):
+        ob[path[2:-2]] = value
+    elif index >= 0:
+        getattr(ob, path)[index] = value
+    else:
+        setattr(ob, path, value)
+    ob.keyframe_insert(path, index=index, frame=frame)
+
+
+def ensure_fade(mat):
+    """mix to transparent by the object's "fade" property (0 solid, 1 at FADE_OPACITY), per object as
+    materials are shared between parts"""
+    nt = mat.node_tree
+    if "fade_mix" not in nt.nodes:
+        out = next(n for n in nt.nodes if n.type == "OUTPUT_MATERIAL" and n.is_active_output)
+        if not out.inputs["Surface"].links:
+            return
+        src = out.inputs["Surface"].links[0].from_socket
+        attr = nt.nodes.new("ShaderNodeAttribute")
+        attr.attribute_type, attr.attribute_name = "OBJECT", "fade"
+        mul = nt.nodes.new("ShaderNodeMath")
+        mul.name, mul.operation = "fade_mul", "MULTIPLY"
+        tr = nt.nodes.new("ShaderNodeBsdfTransparent")
+        mix = nt.nodes.new("ShaderNodeMixShader")
+        mix.name = "fade_mix"
+        nt.links.new(attr.outputs["Fac"], mul.inputs[0])
+        nt.links.new(mul.outputs[0], mix.inputs[0])
+        nt.links.new(src, mix.inputs[1])
+        nt.links.new(tr.outputs[0], mix.inputs[2])
+        nt.links.new(mix.outputs[0], out.inputs["Surface"])
+    nt.nodes["fade_mul"].inputs[1].default_value = 1 - FADE_OPACITY
+
+
+def make_mesh(name, v, t, c, colours, kind):
+    used = sorted(set(c.tolist()))
+    vi = np.unique(t)
+    remap_v = np.full(len(v), -1)
+    remap_v[vi] = np.arange(len(vi))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata((v[vi] * SCALE).tolist(), [], remap_v[t].tolist())
+    for ci in used:
+        m = material_for(kind, *colours[ci])
+        ensure_fade(m)
+        me.materials.append(m)
+    remap = {ci: k for k, ci in enumerate(used)}
+    me.polygons.foreach_set("material_index", [remap[x] for x in c.tolist()])
+    me.validate()
+    me.shade_smooth()
+    me.set_sharp_from_angle(angle=math.radians(35))
+    me.update()
+    return me
 
 
 def build_parts(p):
-    prefs = bpy.context.preferences.edit
-    prefs.keyframe_new_interpolation_type = "LINEAR"
+    F = timeline()
+    fade = round(T_FADE * FPS)
     col = collection("robbie_parts")
     clear_collection(col)
     n = len(p["samples"])
-    lo, hi = np.full(3, 1e9), np.full(3, -1e9)        # assembled bbox (mm)
-    lo1, hi1 = np.full(3, 1e9), np.full(3, -1e9)      # exploded
+
+    # sled parts (drawn more than once) hang off this, it runs them round the ring
+    spin = bpy.data.objects.new("SledSpin", None)
+    col.objects.link(spin)
+    key(spin, "rotation_euler", 0.0, F[4], "BEZIER", 2)
+    key(spin, "rotation_euler", math.radians(SPIN_DEG), F[5], "BEZIER", 2)
+
+    box = {k: [np.full(3, 1e9), np.full(3, -1e9)] for k in ("start", "exploded", "sleds")}
+
+    def grow(k, lo, hi):
+        box[k][0], box[k][1] = np.minimum(box[k][0], lo), np.maximum(box[k][1], hi)
+
     for name, part in p["parts"].items():
         v, t, c, colours = read_3mf(os.path.join(BUILD, part["geom"]))
-        me = bpy.data.meshes.new(name)
-        me.from_pydata((v * SCALE).tolist(), [], t.tolist())
-        used = sorted(set(c.tolist()))
-        for ci in used:
-            me.materials.append(material_for(part["kind"], *colours[ci]))
-        remap = {ci: k for k, ci in enumerate(used)}
-        me.polygons.foreach_set("material_index", [remap[x] for x in c.tolist()])
-        me.validate()
-        me.shade_smooth()
-        me.set_sharp_from_angle(angle=math.radians(35))
-        me.update()
-        ob = bpy.data.objects.new(name, me)
-        col.objects.link(ob)
-
         offs = offsets(name, part["boxes"])
-        for i, o in enumerate(offs):
-            if o is None:
-                continue
-            ob.location = Vector(o) * SCALE
-            ob.keyframe_insert("location", frame=frame_of(i, n))
-        lo, hi = np.minimum(lo, v.min(0)), np.maximum(hi, v.max(0))
+        centres = part.get("centres", [])
+        sled = len(centres) > 1
+
+        # parts that spin on their own axis: one object per copy, origin on its axis
+        if name in SPIN_PARTS:
+            cxy = np.array(centres)[:, :2]
+            tri_xy = v[t].mean(1)[:, :2]
+            near = np.argmin(((tri_xy[:, None, :] - cxy[None]) ** 2).sum(2), 1)
+            pieces = [(f"{name}_{k}", np.array([centres[k][0], centres[k][1], 0.0]), near == k)
+                      for k in range(len(centres))]
+        else:
+            pieces = [(name, np.zeros(3), np.ones(len(t), bool))]
+
+        for oname, origin, mask in pieces:
+            me = make_mesh(oname, v - origin, t[mask], c[mask], colours, part["kind"])
+            ob = bpy.data.objects.new(oname, me)
+            col.objects.link(ob)
+            if sled:
+                ob.parent = spin
+            for i, o in enumerate(offs):
+                if o is None:
+                    continue
+                loc = Vector((origin + np.array(o)) * SCALE)
+                key(ob, "location", loc, lin(F[1], F[2], i, n), "LINEAR")
+                key(ob, "location", loc, lin(F[4], F[3], i, n), "LINEAR")
+            if name in SPIN_PARTS:
+                key(ob, "rotation_euler", 0.0, F[4], "BEZIER", 2)
+                key(ob, "rotation_euler", math.radians(SPIN_DEG * part["spin"]), F[5], "BEZIER", 2)
+            if name in FADE_PARTS:
+                for f, val in ((F[4], 0.0), (F[4] + fade, 1.0), (F[5] - fade, 1.0), (F[5], 0.0)):
+                    key(ob, '["fade"]', val, f, "BEZIER")
+
         last = np.array(offs[-1] or [0, 0, 0])
-        lo1, hi1 = np.minimum(lo1, v.min(0) + last), np.maximum(hi1, v.max(0) + last)
-    prefs.keyframe_new_interpolation_type = "BEZIER"
-    return lo * SCALE, hi * SCALE, lo1 * SCALE, hi1 * SCALE
+        grow("start", v.min(0), v.max(0))
+        grow("exploded", v.min(0) + last, v.max(0) + last)
+        if sled:
+            grow("sleds", v.min(0) + last, v.max(0) + last)
+    bpy.context.preferences.edit.keyframe_new_interpolation_type = "BEZIER"
+    return {k: (a * SCALE, b * SCALE) for k, (a, b) in box.items()}
 
 
 def backdrop(floor_z):
@@ -501,24 +622,20 @@ def empty(name, parent=None):
     return ob
 
 
-def studio(lo, hi, lo1, hi1):
+def studio(box):
     sc = bpy.context.scene
-    f0, f1 = 1, HOLD_START + EXPLODE + HOLD_END + 1
-    fe0, fe1 = HOLD_START + 1, HOLD_START + EXPLODE + 1
-    sc.frame_start, sc.frame_end = f0, f1
+    F = timeline()
+    (lo, hi), (lo1, hi1) = box["start"], box["exploded"]
+    sc.frame_start, sc.frame_end = F[0], F[5] - 1   # F[5] is frame 1 again
     sc.render.fps = FPS
 
     backdrop(min(0.0, lo[2]))
 
+    # camera turn: ORBIT_DEG over the explode, on round to a full turn in the detail orbit, then still
     rig = empty("CamRig")
     rig.animation_data_clear()
-    prefs = bpy.context.preferences.edit
-    prefs.keyframe_new_interpolation_type = "LINEAR"
-    rig.rotation_euler = (0, 0, 0)
-    rig.keyframe_insert("rotation_euler", index=2, frame=f0)
-    rig.rotation_euler = (0, 0, math.radians(ORBIT_DEG))
-    rig.keyframe_insert("rotation_euler", index=2, frame=f1)
-    prefs.keyframe_new_interpolation_type = "BEZIER"
+    for f, a in ((F[0], 0), (F[2], ORBIT_DEG), (F[3], 360)):
+        key(rig, "rotation_euler", math.radians(a), f, "BEZIER", 2)
 
     target = empty("CamTarget")
     lt = empty("LightTarget")
@@ -550,14 +667,15 @@ def studio(lo, hi, lo1, hi1):
         dist = max(app_h / 2 / math.tan(vf / 2), d_xy / 2 / math.tan(hf / 2)) * 1.04 + d_xy / 2
         return dist, (a[2] + b[2]) / 2
 
+    start, exploded = fit(lo, hi), fit(lo1, hi1)
+    sl, sh = box["sleds"]
+    detail = (exploded[0] * DETAIL_ZOOM, (sl[2] + sh[2]) / 2)
     cam.animation_data_clear()
     target.animation_data_clear()
-    for frame, (a, b) in ((fe0, (lo, hi)), (fe1, (lo1, hi1))):
-        dist, cz = fit(a, b)
-        target.location = (0, 0, cz)
-        target.keyframe_insert("location", frame=frame)
-        cam.location = (0, -dist * math.cos(el), cz + dist * math.sin(el))
-        cam.keyframe_insert("location", frame=frame)
+    for frame, (dist, cz) in ((F[1], start), (F[2], exploded),
+                              (F[2] + round(0.4 * (F[3] - F[2])), detail), (F[3], detail), (F[4], start)):
+        key(target, "location", Vector((0, 0, cz)), frame, "BEZIER")
+        key(cam, "location", Vector((0, -dist * math.cos(el), cz + dist * math.sin(el))), frame, "BEZIER")
 
     size = max(hi1[0] - lo1[0], hi1[2] - lo1[2])
     r = 4 * size
@@ -582,6 +700,7 @@ def studio(lo, hi, lo1, hi1):
     r_.image_settings.file_format = "PNG"
     r_.filepath = "//.output/final/frame_"
     sc.cycles.samples = 256
+    sc.cycles.transparent_max_bounces = 64   # faded parts stack many layers deep
     sc.cycles.use_denoising = True
     sc.view_settings.view_transform = "AgX"
     try:
@@ -601,7 +720,7 @@ def main():
         bpy.ops.wm.open_mainfile(filepath=BLEND)
     else:
         bpy.ops.wm.read_factory_settings(use_empty=True)
-    studio(*build_parts(p))
+    studio(build_parts(p))
     bpy.ops.wm.save_as_mainfile(filepath=BLEND, compress=True)
     print("build_scene: saved", BLEND)
 

@@ -3,8 +3,10 @@ Render blender/robbie.blend with Cycles on the GPU.
 
     blender --background blender/robbie.blend --python blender/render.py -- preview
         quick, half size, 16 sample render of the whole animation straight to blender/.output/preview.mp4
+        (-- preview NAME writes NAME.mp4)
     blender --background blender/robbie.blend --python blender/render.py -- test
-        a few low sample, half size frames (assembled, mid explode, exploded) to blender/.output/test/
+        a few low sample, half size frames (assembled, mid explode, end, or the frame numbers given) to
+        blender/.output/test/
     blender --background blender/robbie.blend --python blender/render.py -- stills
         3 full size, 512 sample stills (assembled, half way, exploded) to blender/.output/stills/
     blender --background blender/robbie.blend --python blender/render.py -- final
@@ -12,7 +14,7 @@ Render blender/robbie.blend with Cycles on the GPU.
 
 Then to make the mp4 (ffmpeg is in WSL):
     wsl -e sh -c 'cd /mnt/c/Users/duckman/git_personal/robbie_openscad/blender/.output && \
-        ffmpeg -y -framerate 30 -i final/frame_%04d.png -c:v libx264 -crf 16 -pix_fmt yuv420p robbie.mp4'
+        ffmpeg -y -framerate 25 -i final/frame_%04d.png -c:v libx264 -crf 16 -pix_fmt yuv420p robbie.mp4'
 """
 
 import bpy
@@ -49,7 +51,7 @@ if mode == "preview":
     sc.cycles.samples = 16
     sc.cycles.max_bounces = 4
     sc.cycles.diffuse_bounces = sc.cycles.glossy_bounces = 2
-    sc.cycles.transmission_bounces = sc.cycles.transparent_max_bounces = 2
+    sc.cycles.transmission_bounces = 2
     sc.cycles.caustics_reflective = sc.cycles.caustics_refractive = False
     sc.cycles.use_fast_gi = True
     if sc.cycles.device == "GPU" and cy.compute_device_type == "OPTIX":
@@ -62,14 +64,14 @@ if mode == "preview":
     sc.render.ffmpeg.format = "MPEG4"
     sc.render.ffmpeg.codec = "H264"
     sc.render.ffmpeg.constant_rate_factor = "HIGH"
-    sc.render.filepath = "//.output/preview.mp4"
+    sc.render.filepath = f"//.output/{argv[1] if len(argv) > 1 else 'preview'}.mp4"
     bpy.ops.render.render(animation=True)
 elif mode == "test":
     sc.cycles.samples = 48
     sc.render.resolution_percentage = 50
     f0, f1 = sc.frame_start, sc.frame_end
     hold = 20
-    frames = [f0, f0 + hold + (f1 - f0 - hold) // 3, f1]
+    frames = [int(x) for x in argv[1:]] or [f0, f0 + hold + (f1 - f0 - hold) // 3, f1]
     for f in frames:
         sc.frame_set(f)
         sc.render.filepath = f"//.output/test/frame_{f:04d}.png"

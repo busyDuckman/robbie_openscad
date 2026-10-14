@@ -110,6 +110,8 @@ wire_channel_shift = 2; // move the channel off the fairing wall towards the pin
 fairing_t = 1.6;   // wall thickness
 fairing_fit = 1.0; // clearance to the ring gear tips
 
+sled_top_h = 4;        // sled_top plate thickness
+sled_pin = [1.75, 5];  // sled_top / upper_sled alignment pins (filament offcut): diameter, length
 top_sled_screw_l = 9; // 6g countersunk, sled_top to upper_sled (9 or 12)
 
 sled_tab_d = 3;    // upper / lower sled join tabs (helpers.scad join_tab_*)
@@ -680,13 +682,18 @@ module upper_sled(pionion_r=0) {
         up(2)
         at_sled_holes()
             self_tap_hole(gauge=6, length=18, screw_type=my_screw_no_head,
-                  hole_type=HOLE_SNUG, anchor=TOP);
+                  hole_type=HOLE_TRI_TWIST, anchor=TOP);
 
-        // sled_top screws, 3 of the screw is in the sled_top
+        // sled_top screws, sled_top_h of the screw is in the sled_top
         up(upper_sled_h)
             at_top_sled_holes()
-                self_tap_hole(gauge=6, length=top_sled_screw_l - 3, screw_type=my_screw_no_head,
-                    hole_type=HOLE_SNUG, anchor=TOP);
+                self_tap_hole(gauge=6, length=top_sled_screw_l - sled_top_h, screw_type=my_screw_no_head,
+                    hole_type=HOLE_TRI_TWIST, anchor=TOP);
+
+        up(upper_sled_h)
+            at_sled_pins()
+                zflip()
+                    sled_pin_hole();
         
     }
 }
@@ -829,7 +836,7 @@ module lower_sled(pionion_r=0) {
         at_sled_holes()
             yrot(180)
                 self_tap_hole(gauge=6, length=18, screw_type=my_screw,
-                    hole_type=HOLE_SNUG, anchor=TOP);
+                    hole_type=HOLE_CLEARANCE, anchor=TOP);
     }
 }
 
@@ -871,13 +878,26 @@ module at_top_sled_holes() {
             children();
 }
 
+// sled_top / upper_sled alignment pins: inward (+Y), between the pcb pocket and the sled's edge
+module at_sled_pins() {
+    for (x = [-7, 7])
+        translate([x, 13.4, 0])
+            children();
+}
+
+// blind hole for half a pin (plus 0.5 slack), mouth on z=0, going up +Z
+module sled_pin_hole() {
+    down(0.01)
+        cyl(d=sled_pin.x + 0.15, h=sled_pin.y/2 + 0.5 + 0.01, anchor=BOTTOM, $fn=16);
+}
+
 module sled_top() {
     color("blue")
     difference() {
         union() {
-            sled_shape(3, greater_d=collar_od()-6);
+            sled_shape(sled_top_h, greater_d=collar_od()-6);
             fwd(3)
-            up(3) 
+            up(sled_top_h) 
             {
                 // NOTE: the front / back anchors mean the gap is defined easily regardless of cyl(h)
                 top_bearing(anchor=FRONT);
@@ -886,10 +906,13 @@ module sled_top() {
             }
         }
 
-        up(3)
+        up(sled_top_h)
             at_top_sled_holes()
                 self_tap_hole(gauge=6, length=top_sled_screw_l, screw_type=my_screw,
-                    hole_type=HOLE_SNUG, anchor=TOP);
+                    hole_type=HOLE_CLEARANCE, anchor=TOP);
+
+        at_sled_pins()
+            sled_pin_hole();
     }
 }
 
@@ -908,9 +931,34 @@ module top_sled_screw() {
 
 // down through the sled_top into the upper sled, head flush with the sled_top's top face
 module at_top_sled_screws() {
-    up(upper_sled_z + upper_sled_h + 3)
+    up(upper_sled_z + upper_sled_h + sled_top_h)
         at_top_sled_holes()
             children();
+}
+
+// alignment pin, bottom on z=0
+module sled_pin() {
+    color("white")
+    cyl(d=sled_pin.x, h=sled_pin.y, anchor=BOTTOM, $fn=16);
+}
+
+// centred on the sled_top / upper_sled joint
+module at_sled_pins_hw() {
+    up(upper_sled_z + upper_sled_h - sled_pin.y/2)
+        at_sled_pins()
+            children();
+}
+
+// as5600 diametric magnet, bottom on z=0
+module magnet() {
+    color("silver")
+    cyl(d=magnet_d, h=magnet_h, anchor=BOTTOM, $fn=64*LOD);
+}
+
+// in the pinion's magnet cup
+module at_magnet() {
+    up(collar_gear_h + magnet_offset)
+        children();
 }
 
 // up through the lower sled into the upper sled, head flush with the lower sled's underside
@@ -931,10 +979,10 @@ module bearing_nut() {
     nut("M3", anchor=TOP, $fn=24);
 }
 
-// through the top bearings (sled_top: up 3, axle 4 up), head on the outer face of the outer one
+// through the top bearings (sled_top: up sled_top_h, axle 4 up), head on the outer face of the outer one
 // (y = -3 - 10 - 7), shank along +Y
 module at_bearing_screw() {
-    up(upper_sled_z + upper_sled_h + 3 + 4)
+    up(upper_sled_z + upper_sled_h + sled_top_h + 4)
         fwd(3 + 10 + 7)
             xrot(90)
                 children();
@@ -942,7 +990,7 @@ module at_bearing_screw() {
 
 // in the inner bearing's trap (outer face y = -3 + 7), a point up
 module at_bearing_nut() {
-    up(upper_sled_z + upper_sled_h + 3 + 4)
+    up(upper_sled_z + upper_sled_h + sled_top_h + 4)
         back(-3 + 7)
             xrot(-90)
                 zrot(90)
@@ -953,8 +1001,13 @@ module sled_assembly(pionion_r=0, expand = 0) {
     up(motor_z())
         n20_motor();
         
-    up(35 * expand)
+    up(32 * expand)
     pinion(gear_spin=pionion_r);
+
+    // midway between the pinion's top (32 + 11.5) and the upper sled's fairing (50 + 0)
+    up(36.5 * expand)
+        at_magnet()
+            magnet();
 
     up(30 * expand)
     down(lower_sled_h)
@@ -977,6 +1030,10 @@ module sled_assembly(pionion_r=0, expand = 0) {
     up(75 * expand)
         at_top_sled_screws()
             top_sled_screw();
+
+    up(60 * expand)
+        at_sled_pins_hw()
+            sled_pin();
 
     
     up(60 * expand)
@@ -1064,7 +1121,8 @@ if(part == 0) {
 //    6 home switch plug   -6 bearing nut (m3)
 //    7 lower sled         -7 sled screws (6g x 16)
 //    8 upper sled         -8 wire harness
-//    9 sled top
+//    9 sled top           -9 magnet
+//                        -10 sled alignment pin
 
 // printed parts: on the bed when print_layout (turned xrot then yrot, then lifted onto z=0), raw otherwise
 module print_layout(xrot=0, yrot=0, lift=0) {
@@ -1135,6 +1193,14 @@ if(part == -6) {
 
 if(part == -7) {
     sled_screw();
+}
+
+if(part == -10) {
+    sled_pin();
+}
+
+if(part == -9) {
+    magnet();
 }
 
 if(part == -8) {
