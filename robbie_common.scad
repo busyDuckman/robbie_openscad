@@ -10,24 +10,31 @@ include <helpers.scad>
 use <nop_screws.scad>
 
 /*
-Shared by base.scad and sled.scad: library includes, the base / collar / gear sizes the sleds
-are built around, and the ring gear placement functions. Use include <robbie_common.scad>.
+    Shared constants for the robbie robot.
+    
+    vobab:
+      _od:  outer diamater
+      _id:  inner diamater
+      _h:   height
+      _dia  diamter
 */
+
+
 
 // ----------------------------------------------------------------------------------------
 // Globals
 // ----------------------------------------------------------------------------------------
 
-LOD = 0.5; // 0.25 for speed, 1.0 for checks, 2.0 for prints;
+LOD = 0.5;              // 0.25 for speed, 1.0 for checks, 2.0 for prints;
 
-base_od = 150;
-base_id = 100;
-base_cable_dia = 12;
-base_h = 40;
+base_od = 150;          // outer diam
+base_id = 100;          // innter diam, alter ring_gear_teeth to suit
+base_cable_dia = 12;    // size of the mouse hole  (cable pass through 
+base_h = 40;            // height the collar will be lifted of the ground
 base_chamfer_h = 15;    // vertical drop of the outer top chamfer (horizontal is set by the collar od)
 
-guide_id = 20;
-guide_h = 10;
+guide_id = 20;          // the ring used to stopcables getting jammed.
+guide_h = 10;           // the ring used to stopcables getting jammed.
 
 collar_h = 10;
 collar_gear_h = 8;
@@ -82,4 +89,16 @@ module at_pinion(angle) {
     zrot(angle)
         fwd(pinion_dist())
             children();
+}
+
+// ----------------------------------------------------------------------------------------
+// Assembly views
+// ----------------------------------------------------------------------------------------
+
+// show children unless v (a view_mask entry) is 0; a missing entry shows, so [] shows everything
+// (binary: OpenSCAD's colour alpha can't fade parts that set their own colour)
+module apply_view(v) {
+    if (is_undef(v) || v > 0) {
+        children();
+    }
 }

@@ -39,10 +39,11 @@ home_switch_ledge_h = 6;     // depth of the ledges under the plug's fingers (th
 // base / collar join tabs: between the screws, none at the home switch, so the collar only fits one way round
 module at_join_tabs() {
     for (a = [0 : 360/8 : 359])
-        if (abs(posmod(a - home_switch_a + 180, 360) - 180) > 1)
+        if (abs(posmod(a - home_switch_a + 180, 360) - 180) > 1) {
             zrot(a)
                 right(collar_holes_r())
                     children();
+        }
 }
 
 module base() {
@@ -105,13 +106,14 @@ module home_switch_wedge(y1, inset=0, corner_r=0) {
     back_w = d2f_body.x + 2*c + 2*home_switch_wedge - 2*inset;
 
     hull() {
-        if (corner_r > 0)
+        if (corner_r > 0) {
             for (s = [-1, 1])
                 translate([s * (back_w/2 - corner_r), y0, back_z + corner_r])
                     ycyl(r=corner_r, h=y1 - y0, anchor=FRONT, $fn=24);
-        else
+        } else {
             translate([0, y0, back_z])
                 cuboid([back_w, y1 - y0, 0.01], anchor=FRONT+BOTTOM);
+        }
 
         translate([0, y0, front_z])
             cuboid([d2f_body.x + 2*c - 2*inset, y1 - y0, 0.01], anchor=FRONT+TOP);
@@ -245,54 +247,91 @@ module guide() {
     tube(id = guide_id , od=guide_id +t+t, h=t, chamfer=0.25, $fn=128*LOD);
 }
 
+
+// ----------------------------------------------------------------------------------------
+module base_assembly(expand = 0, slice_mode = 0, view_mask=[], sled_view_mask=[]) {
+    difference() {
+        union() {
+            apply_view(view_mask[0])
+                base();
+            
+            apply_view(view_mask[1])
+                up(11 * expand)
+                    position_home_switch()
+                        d2f_switch(lever=false);
+            
+            apply_view(view_mask[2])
+                up(18 * expand)
+                    position_home_switch()
+                        home_switch_plug();
+            
+                
+            
+            apply_view(view_mask[3])
+                up(20 * expand)
+                    up(base_h)
+                        collar();
+            
+
+
+            apply_view(view_mask[4])
+                up(50 * (expand*1.5))
+                    up(base_h)
+                        for(angle = [0, 120, 240]) {
+                            at_pinion(angle)
+                                sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5)*2, view_mask=sled_view_mask);
+                        }
+            
+            
+            apply_view(view_mask[5])
+                up(50 * expand)
+                    up(guide_h)
+                        guide();
+            
+        }
+
+        if (slice_mode == 1 || slice_mode == 3) {
+            cuboid([400, 400, 400], anchor=BACK);
+        }
+
+        if (slice_mode == 2 || slice_mode == 3) {
+            zrot(30)
+                cuboid([400, 400, 400], anchor=BACK);
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------------------
 // Render
 // ----------------------------------------------------------------------------------------
 part = 0;
-expand = 1; //0.5;     // 0 = assembeld, 0.5 = base expanded only, 1.0 = fully expanded. Can be animated.
+expand = 0; //0.5;     // 0 = assembeld, 0.5 = base expanded only, 1.0 = fully expanded. Can be animated.
 slice_mode = 0; // cut the assembly: 0 none
                 //   1 X/Z plane (y = 0, through the home switch plunger), keep +Y
                 //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
                 //   3 both 1 and 2
 print_layout=true;
 
+
+// base view_mask:
+//      0 base,         1 d2f switch,   2 plug,         3 collar,           4 sleds,
+//      5 guide
+//
+// sled view_mask:
+//      0 motor,        1 pinion,       2 magnet,       3 lower sled,       4 sled screws, 
+//      5 upper sled,   6 sled top,     7 top screws,   8 alignment pins,   9 sensor, 
+//      10 screw/nut,   11 wire harness
+
+base_collision_view = [0,0,0,1,1,0];
+sled_collision_view = [0,1,0, 0,0,1, 0,0,0, 0,0,0];
+
+
+view = base_collision_view ;   //[];
+sled_view = sled_collision_view;   //[];
+
 // full assembly
 if(part == 0) {
-    difference() {
-        union() {
-            base();
-            up(11 * expand)
-            position_home_switch()
-                d2f_switch(lever=false);
-            
-            up(18 * expand)
-            position_home_switch()
-                home_switch_plug();
-                
-            up(20 * expand)
-            up(base_h)
-            collar();
-
-
-            up(50 * (expand*1.5))
-            up(base_h)
-            for(angle = [0, 120, 240]) {
-                at_pinion(angle)
-                    sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5)*2);
-            }
-            
-            up(50 * expand)
-            up(guide_h)
-                guide();
-        }
-
-        if (slice_mode == 1 || slice_mode == 3)
-            cuboid([400, 400, 400], anchor=BACK);
-
-        if (slice_mode == 2 || slice_mode == 3)
-            zrot(30)
-                cuboid([400, 400, 400], anchor=BACK);
-    }
+    base_assembly(expand=expand, slice_mode=slice_mode, view_mask=view, sled_view_mask=sled_view );
 }
 
 // ----------------------------------------------------------------------------------------
@@ -314,50 +353,59 @@ if(part == 0) {
 
 // printed parts: on the bed when print_layout (turned xrot then yrot, then lifted onto z=0), raw otherwise
 module print_layout(xrot=0, yrot=0, lift=0) {
-    if (print_layout)
+    if (print_layout) {
         up(lift)
             yrot(yrot)
                 xrot(xrot)
                     children();
-    else
+    } else {
         children();
+    }
 }
 
-if(part == 1)
+if(part == 1) {
     print_layout()
         base();
+}
 
-if(part == 2)
+if(part == 2) {
     print_layout()
         collar();
+}
 
 // centred tube
-if(part == 3)
+if(part == 3) {
     print_layout(lift=3/2)
         guide();
+}
 
-if(part == 4)
+if(part == 4) {
     print_layout()
         pinion();
+}
 
 // top face down (switch frame +Y is up)
-if(part == 6)
+if(part == 6) {
     print_layout(xrot=-90, lift=base_h - home_switch_z())
         home_switch_plug();
+}
 
 // top face down, join tab pits on the bed
-if(part == 7)
+if(part == 7) {
     print_layout(xrot=180, lift=lower_sled_h)
         lower_sled();
+}
 
 // plate top down, join tabs pointing up
-if(part == 8)
+if(part == 8) {
     print_layout(xrot=180, lift=upper_sled_h)
         upper_sled();
+}
 
-if(part == 9)
+if(part == 9) {
     print_layout()
         sled_top();
+}
 
 if(part == -1) {
     d2f_switch(lever=false);

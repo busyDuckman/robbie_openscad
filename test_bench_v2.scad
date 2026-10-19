@@ -253,14 +253,15 @@ module dial() {
 module magnet_insert(m) {
     color("royalblue")
     difference() {
-        if (m[0] < big_d - 0.01)
+        if (m[0] < big_d - 0.01) {
             difference() {
                 cyl(d=pocket_d - 0.1, h=big_h, anchor=BOTTOM, $fn=64);
                 up(big_h - m[1])
                 cyl(d=m[0] + magnet_fit, h=m[1] + 1, anchor=BOTTOM, $fn=64);
             }
-        else
+        } else {
             cyl(d=pocket_d - 0.1, h=big_h - m[1], anchor=BOTTOM, $fn=64);   // spacer under a thinner magnet
+        }
 
         cyl(d=push_hole_d, h=3*big_h, $fn=16);
     }
@@ -420,12 +421,26 @@ module bench_assembly(gap, turn=40) {
 }
 
 
-if (part == 0) bench_assembly(gap);
-if (part == 1) bench_base();
-if (part == 2) dial();
-if (part == 3) xrot(180) bridge();   // print beam-down
-if (part == 4) thumb_wheel();
-if (part == 5)   // inserts for every magnet that isn't the biggest
+if (part == 0) {
+    bench_assembly(gap);
+}
+if (part == 1) {
+    bench_base();
+}
+if (part == 2) {
+    dial();
+}
+if (part == 3) {
+    // print beam-down
+    xrot(180)
+        bridge();
+}
+if (part == 4) {
+    thumb_wheel();
+}
+if (part == 5) {
+    // inserts for every magnet that isn't the biggest
     for (i = idx(inserts))
         right(i * (big_d + 4))
         magnet_insert(inserts[i]);
+}

@@ -166,8 +166,9 @@ module sled_profile(pinion_hole_d, slice_a = 45, slice_d = base_id, greater_d) {
             translate(c)
                 circle(d=greater_d, $fn=512*LOD);
         }
-        if (is_def(pinion_hole_d))
+        if (is_def(pinion_hole_d)) {
             circle(d=pinion_hole_d, $fn=64*LOD);
+        }
     }
 }
 
@@ -306,8 +307,9 @@ module at_sled_tabs() {
 module at_sled_holes(pionion_r=0) {
     //fwd(5)
     for (side=[-1, 1])
-        left(12.5 * side)
-            children();
+        //fwd(0.5)
+            left(12.4 * side)
+                children();
 }
 
 // pcb pocket (negative, upper sled frame), open at the top, floor low enough for wires under the
@@ -347,7 +349,7 @@ module upper_sled(pionion_r=0) {
         union() {
             sled_shape(upper_sled_h, greater_d=collar_od()-6, pinion_hole_d=10);
             at_sled_holes()
-                cyl(d=5.5, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
+                cyl(d=6.5, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
             down(upper_sled_z) {
                 fairing();
                 wire_conduit();
@@ -395,7 +397,7 @@ module upper_sled(pionion_r=0) {
         // sled_top screws, sled_top_h of the screw is in the sled_top
         up(upper_sled_h)
             at_top_sled_holes()
-                self_tap_hole(gauge=6, length=top_sled_screw_l - sled_top_h, screw_type=my_screw_no_head,
+                self_tap_hole(gauge=4, length=top_sled_screw_l - sled_top_h, screw_type=my_screw_no_head,
                     hole_type=HOLE_TRI_TWIST, anchor=TOP);
 
         up(upper_sled_h)
@@ -537,7 +539,7 @@ module lower_sled(pionion_r=0) {
             rolling_interface(sled_lead_in, lower_sled_h + 0.02, side_ang=side_ang);
         }
         
-        //there is a colllar befor the motor caft, this allws clerance.
+        //there is a colllar befor the motor shaft, this allows clerance.
         down(motor_z())
         cyl(d=6, h=0.5, anchor=BOTTOM, $fn=64*LOD);
 
@@ -569,11 +571,12 @@ module top_bearing(anchor=Front) {
             ycyl(d=3.4, h=20, $fn=32*LOD);
 
         // m3 nut capture on the inner one's (FRONT anchored, +Y) outer face, a point up so it prints
-        if (anchor == FRONT)
+        if (anchor == FRONT) {
             translate([0, 7 + 0.01, axle_h])
                 xrot(-90)
                     zrot(90)
                         cyl(d=(5.5 + 0.3)/cos(30), h=3, anchor=TOP, $fn=6);
+        }
     }
 }
 
@@ -705,57 +708,67 @@ module at_bearing_nut() {
                     children();
 }
 
-module sled_assembly(pionion_r=0, expand = 0) {
-    up(motor_z())
-        n20_motor();
-        
-    up(32 * expand)
-    pinion(gear_spin=pionion_r);
+// view_mask (see apply_view()): 0 motor, 1 pinion, 2 magnet, 3 lower sled, 4 sled screws, 5 upper sled,
+//   6 sled top, 7 sled top screws, 8 alignment pins, 9 sensor, 10 bearing screw and nut, 11 wire harness
+module sled_assembly(pionion_r=0, expand = 0, view_mask=[]) {
+    apply_view(view_mask[0])
+        up(motor_z())
+            n20_motor();
+
+    apply_view(view_mask[1])
+        up(32 * expand)
+            pinion(gear_spin=pionion_r);
 
     // midway between the pinion's top (32 + 11.5) and the upper sled's fairing (50 + 0)
-    up(36.5 * expand)
-        at_magnet()
-            magnet();
+    apply_view(view_mask[2])
+        up(36.5 * expand)
+            at_magnet()
+                magnet();
 
-    up(30 * expand)
-    down(lower_sled_h)
-     lower_sled();
+    apply_view(view_mask[3])
+        up(30 * expand)
+            down(lower_sled_h)
+                lower_sled();
 
-    up(10 * expand)
-        at_sled_screws()
-            sled_screw();
-    
-    
-    up(50 * expand)
-    up(upper_sled_z)
-        upper_sled(pionion_r);
-        
-    
-    up(70 * expand)
-    up(upper_sled_z + upper_sled_h)
-        sled_top();
+    apply_view(view_mask[4])
+        up(10 * expand)
+            at_sled_screws()
+                sled_screw();
 
-    up(75 * expand)
-        at_top_sled_screws()
-            top_sled_screw();
+    apply_view(view_mask[5])
+        up(50 * expand)
+            up(upper_sled_z)
+                upper_sled(pionion_r);
 
-    up(60 * expand)
-        at_sled_pins_hw()
-            sled_pin();
+    apply_view(view_mask[6])
+        up(70 * expand)
+            up(upper_sled_z + upper_sled_h)
+                sled_top();
 
-    
-    up(60 * expand)
-    sensor();
-    
-    up(80 * expand) {
-        at_bearing_screw()
-            bearing_screw();
-        at_bearing_nut()
-            bearing_nut();
-    }
-    
-    
-    wire_harness();
+    apply_view(view_mask[7])
+        up(75 * expand)
+            at_top_sled_screws()
+                top_sled_screw();
+
+    apply_view(view_mask[8])
+        up(60 * expand)
+            at_sled_pins_hw()
+                sled_pin();
+
+    apply_view(view_mask[9])
+        up(60 * expand)
+            sensor();
+
+    apply_view(view_mask[10])
+        up(80 * expand) {
+            at_bearing_screw()
+                bearing_screw();
+            at_bearing_nut()
+                bearing_nut();
+        }
+
+    apply_view(view_mask[11])
+        wire_harness();
 }
 
 
@@ -763,17 +776,25 @@ module sled_assembly(pionion_r=0, expand = 0) {
 // ----------------------------------------------------------------------------------------
 // Standalone view, only when sled.scad is opened directly (base.scad sets robbie_base)
 // ----------------------------------------------------------------------------------------
-sled_view = 1; // 0 none, 1 sled assembly, 2 lower sled, 3 upper sled, 4 sled top, 5 pinion
+_sled_view = 1; // 0 none, 1 sled assembly, 2 lower sled, 3 upper sled, 4 sled top, 5 pinion
 
 if (is_undef(robbie_base)) {
-    if (sled_view == 1)
+    if (_sled_view == 1) {
         sled_assembly();
-    if (sled_view == 2)
-        lower_sled();
-    if (sled_view == 3)
+    }
+    if (_sled_view == 2) {
+            lower_sled();
+        
+        down(12)
+        pinion(gear_spin=0);
+    }
+    if (_sled_view == 3) {
         upper_sled();
-    if (sled_view == 4)
+    }
+    if (_sled_view == 4) {
         sled_top();
-    if (sled_view == 5)
+    }
+    if (_sled_view == 5) {
         pinion();
+    }
 }

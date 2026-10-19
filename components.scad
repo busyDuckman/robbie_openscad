@@ -72,9 +72,10 @@ module d2f_switch(clearance=0, lever=true) {
     color("#222")
     difference() {
         cuboid([d2f_body.x + 2*c, d2f_body.y + 2*c, d2f_body.z + 2*c], anchor=BOTTOM, $fn=16);
-        if (c == 0)
+        if (c == 0) {
             d2f_hole_positions()
                 ycyl(d=d2f_hole_d, h=2*d2f_body.y, $fn=24);
+        }
     }
 
     // button at its free height, off centre towards +X
@@ -171,13 +172,14 @@ module as5600_board(clearance=0, headers, right_angle=false) {
         cuboid([as5600_pcb.x + 2*c, as5600_pcb.y + 2*c, as5600_pcb.z], rounding=1 + c, edges="Z", anchor=BOTTOM, $fn=16);
         as5600_hole_positions()
             cyl(d=as5600_hole_d, h=3*as5600_pcb.z, $fn=32);
-        if (c == 0)
+        if (c == 0) {
             as5600_via_positions()
                 cyl(d=header_via.x, h=3*as5600_pcb.z, $fn=16);
+        }
     }
 
     // header pads, both faces
-    if (c == 0)
+    if (c == 0) {
         color("gold")
         as5600_via_positions()
         down(0.05)
@@ -185,6 +187,7 @@ module as5600_board(clearance=0, headers, right_angle=false) {
             cyl(d=header_via.y, h=as5600_pcb.z + 0.1, anchor=BOTTOM, $fn=24);
             cyl(d=header_via.x, h=3*as5600_pcb.z, $fn=16);
         }
+    }
 
     // chip, legs along the long sides
     up(as5600_pcb.z) {
@@ -196,16 +199,18 @@ module as5600_board(clearance=0, headers, right_angle=false) {
     }
 
     // mirror the -x column so right angle pins point outward
-    if (headers == TOP)
+    if (headers == TOP) {
         for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
             translate([h[0], 0, as5600_pcb.z])
                 mirror([h[0] < 0 ? 1 : 0, 0, 0])
                     header_strip(h[1], right_angle);
+    }
 
-    if (headers == BOTTOM)
+    if (headers == BOTTOM) {
         for (h = [[-as5600_header_x, 3], [as5600_header_x, 4]])
             translate([h[0], 0, 0])
                 zflip()
                     mirror([h[0] < 0 ? 1 : 0, 0, 0])
                         header_strip(h[1], right_angle);
+    }
 }
