@@ -320,7 +320,7 @@ slice_mode = 0; // cut the assembly: 0 none
                 //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
                 //   3 both 1 and 2
 print_layout=true;
-debug = true;  // assembly debug aids (ring gear teeth tube)
+debug = false;  // assembly debug aids (ring gear teeth tube)
 
 
 // base view_mask:
@@ -329,11 +329,11 @@ debug = true;  // assembly debug aids (ring gear teeth tube)
 //
 // sled view_mask:
 //      0 motor,        1 pinion,       2 magnet,       3 lower sled,       4 sled screws, 
-//      5 upper sled,   6 sled top,     7 top screws,   8 alignment pins,   9 sensor, 
+//      5 upper sled,   6 sled top,     7 top screws,   8 biscuits,         9 sensor, 
 //      10 screw/nut,   11 wire harness
 
 base_collision_view = [0,0,0,1,1,0];
-sled_collision_view = [0,1,0, 0,0,1, 0,0,0, 0,0,0];
+sled_collision_view = [0,1,0, 0,0,1, 0,0,1, 0,0,0];
 
 
 view = base_collision_view ;   //[];
@@ -359,7 +359,7 @@ if(part == 0) {
 //    7 lower sled         -7 sled screws (6g x 16)
 //    8 upper sled         -8 wire harness
 //    9 sled top           -9 magnet
-//                        -10 sled alignment pin
+//   10 sled biscuit
 
 // printed parts: on the bed when print_layout (turned xrot then yrot, then lifted onto z=0), raw otherwise
 module print_layout(xrot=0, yrot=0, lift=0) {
@@ -417,6 +417,12 @@ if(part == 9) {
         sled_top();
 }
 
+// lying flat, layers across the joint
+if(part == 10) {
+    print_layout(yrot=90, lift=sled_biscuit.x/2)
+        sled_biscuit();
+}
+
 if(part == -1) {
     d2f_switch(lever=false);
 }
@@ -441,9 +447,6 @@ if(part == -7) {
     sled_screw();
 }
 
-if(part == -10) {
-    sled_pin();
-}
 
 if(part == -9) {
     magnet();

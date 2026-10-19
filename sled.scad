@@ -47,18 +47,18 @@ wire_channel = [wire_n*wire_d + 1, wire_d + 1]; // width, depth of the drop chan
 wire_channel_shift = 2; // move the channel off the fairing wall towards the pinion, a conduit fills the gap
 
 
-fairing_t = 1.0;   // wall thickness
+fairing_t = 1.5;   // wall thickness
 fairing_fit = 1.0; // clearance to the ring gear tips
 
 sled_top_h = 4;        // sled_top plate thickness
-sled_pin = [1.75, 5];  // sled_top / upper_sled alignment pins (filament offcut): diameter, length
+sled_biscuit = [1.6, 8, 4.5]; // sled_top / upper_sled biscuits (printed flat): thickness, length, height
 top_sled_screw_l = 9; // 6g countersunk, sled_top to upper_sled (9 or 12)
 
 sled_tab_d = 3;    // upper / lower sled join tabs (helpers.scad join_tab_*)
 sled_tab_h = 1.2;
 
 sled_hole_xy = [12.5, 0.3]; // lower / upper sled screw posts: x either side of the pinion, y
-sled_post_d = 6.5;          // upper sled screw post diameter (CLEARANCE A)
+sled_post_d = 6.2;          // upper sled screw post diameter (CLEARANCE A)
 
 // ----------------------------------------------------------------------------------------
 // Geometry
@@ -361,6 +361,9 @@ module sensor_pocket_negative() {
     }
 }
 
+// ----------------------------------------------------------------------------------------
+// upper_sled
+// ----------------------------------------------------------------------------------------
 module upper_sled(pionion_r=0) {
     echo(clearance_a_post_to_pinion=clearance_a()[0], clearance_a_post_to_ring=clearance_a()[1],
          clearance_b_conduit_to_pinion=clearance_b());
@@ -397,6 +400,10 @@ module upper_sled(pionion_r=0) {
 
         sensor_pocket();
 
+        // pinion clearance: 1mm past its tooth tips, below the plate
+        down(0.01)
+            cyl(r=pinion_tip_r() + 1, h=upper_sled_z + 0.01, anchor=TOP, $fn=128*LOD);
+
         // wire drop: from the pocket floor through the plate and down the inside of the fairing's inner wall
         translate([0, wire_channel_y(), -upper_sled_z - 0.1])
         cuboid([wire_channel.x, wire_channel.y, sensor_floor_z() + 0.2], anchor=BOTTOM);
@@ -412,10 +419,11 @@ module upper_sled(pionion_r=0) {
             cuboid([wire_channel.x, wire_channel.y, 0.01], anchor=BOTTOM);
         }
                
-        up(2)
+        //type = SCREW_UNIT_UK_GAUGE_NARROW + SCREW_HEAD_COUNTERSUNK + SCREW_FOR_METAL;
+        up(1)
         at_sled_holes()
-            self_tap_hole(gauge=6, length=18, screw_type=my_screw_no_head,
-                  hole_type=HOLE_TRI_TWIST, anchor=TOP);
+            self_tap_hole(gauge=6, length=17.5, screw_type=my_screw_no_head,
+                  hole_type=HOLE_RIBBED_TWIST, anchor=TOP);
 
         // sled_top screws, sled_top_h of the screw is in the sled_top
         up(upper_sled_h)
@@ -424,9 +432,9 @@ module upper_sled(pionion_r=0) {
                     hole_type=HOLE_TRI_TWIST, anchor=TOP);
 
         up(upper_sled_h)
-            at_sled_pins()
+            at_sled_biscuits()
                 zflip()
-                    sled_pin_hole();
+                    sled_biscuit_slot();
         
     }
 }
@@ -612,17 +620,18 @@ module at_top_sled_holes() {
             children();
 }
 
-// sled_top / upper_sled alignment pins: inward (+Y), between the pcb pocket and the sled's edge
-module at_sled_pins() {
-    for (x = [-7, 7])
-        translate([x, 13.4, 0])
+// sled_top / upper_sled biscuits: either side of the pcb pocket, along Y, midway across the strip
+// between the pocket (x 11.7) and the sled's edge, moved towards -Y where the strip widens
+module at_sled_biscuits() {
+    for (x = [-14.2, 14.2])
+        translate([x, -4, 0])
             children();
 }
 
-// blind hole for half a pin (plus 0.5 slack), mouth on z=0, going up +Z
-module sled_pin_hole() {
+// slot for half a biscuit (plus 0.15 fit, 0.25 deeper), mouth on z=0, going up +Z
+module sled_biscuit_slot() {
     down(0.01)
-        cyl(d=sled_pin.x + 0.15, h=sled_pin.y/2 + 0.5 + 0.01, anchor=BOTTOM, $fn=16);
+        cuboid([sled_biscuit.x + 0.15, sled_biscuit.y + 0.15, sled_biscuit.z/2 + 0.25 + 0.01], anchor=BOTTOM);
 }
 
 module sled_top() {
@@ -645,8 +654,8 @@ module sled_top() {
                 self_tap_hole(gauge=6, length=top_sled_screw_l, screw_type=my_screw,
                     hole_type=HOLE_CLEARANCE, anchor=TOP);
 
-        at_sled_pins()
-            sled_pin_hole();
+        at_sled_biscuits()
+            sled_biscuit_slot();
     }
 }
 
@@ -670,16 +679,17 @@ module at_top_sled_screws() {
             children();
 }
 
-// alignment pin, bottom on z=0
-module sled_pin() {
+// biscuit, standing as fitted (thin along X, long along Y), centred on the origin
+// edges chamfered 45, so it clears the slot's printed (not quite sharp) corners and bears on the flat faces
+module sled_biscuit() {
     color("white")
-    cyl(d=sled_pin.x, h=sled_pin.y, anchor=BOTTOM, $fn=16);
+    cuboid([sled_biscuit.x, sled_biscuit.y, sled_biscuit.z], chamfer=0.5);
 }
 
 // centred on the sled_top / upper_sled joint
-module at_sled_pins_hw() {
-    up(upper_sled_z + upper_sled_h - sled_pin.y/2)
-        at_sled_pins()
+module at_sled_biscuits_hw() {
+    up(upper_sled_z + upper_sled_h)
+        at_sled_biscuits()
             children();
 }
 
@@ -732,7 +742,7 @@ module at_bearing_nut() {
 }
 
 // view_mask (see apply_view()): 0 motor, 1 pinion, 2 magnet, 3 lower sled, 4 sled screws, 5 upper sled,
-//   6 sled top, 7 sled top screws, 8 alignment pins, 9 sensor, 10 bearing screw and nut, 11 wire harness
+//   6 sled top, 7 sled top screws, 8 biscuits, 9 sensor, 10 bearing screw and nut, 11 wire harness
 // debug: # tube over the pinion's teeth (root to tip, gear height), to check clearance
 module sled_assembly(pionion_r=0, expand = 0, view_mask=[], debug=false) {
     if (debug) {
@@ -784,8 +794,8 @@ module sled_assembly(pionion_r=0, expand = 0, view_mask=[], debug=false) {
 
     apply_view(view_mask[8])
         up(60 * expand)
-            at_sled_pins_hw()
-                sled_pin();
+            at_sled_biscuits_hw()
+                sled_biscuit();
 
     apply_view(view_mask[9])
         up(60 * expand)

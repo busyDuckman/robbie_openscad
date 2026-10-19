@@ -16,6 +16,7 @@ call :export 6 home_switch_plug
 call :export 7 lower_sled
 call :export 8 upper_sled
 call :export 9 sled_top
+call :export 10 sled_biscuit
 
 echo Done.
 exit /b 0
