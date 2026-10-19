@@ -249,9 +249,18 @@ module guide() {
 
 
 // ----------------------------------------------------------------------------------------
-module base_assembly(expand = 0, slice_mode = 0, view_mask=[], sled_view_mask=[]) {
+// debug: # tube over the ring gear's teeth (tip to root, gear height), to check sled clearance
+module base_assembly(expand = 0, slice_mode = 0, view_mask=[], sled_view_mask=[], debug=false) {
     difference() {
         union() {
+            if (debug) {
+                up(20 * expand)
+                    up(base_h + gear_z_offset)
+                        #tube(ir=ring_tip_r(),
+                              or=outer_radius(mod=gear_mod, teeth=ring_gear_teeth, internal=true, profile_shift=pinion_shift),
+                              h=collar_gear_h, anchor=BOTTOM, $fn=256*LOD);
+            }
+
             apply_view(view_mask[0])
                 base();
             
@@ -279,7 +288,7 @@ module base_assembly(expand = 0, slice_mode = 0, view_mask=[], sled_view_mask=[]
                     up(base_h)
                         for(angle = [0, 120, 240]) {
                             at_pinion(angle)
-                                sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5)*2, view_mask=sled_view_mask);
+                                sled_assembly(pionion_r=pinion_spin(angle), expand = max(0, expand - 0.5)*2, view_mask=sled_view_mask, debug=debug);
                         }
             
             
@@ -311,6 +320,7 @@ slice_mode = 0; // cut the assembly: 0 none
                 //   2 1 turned 30 CCW, through the angle 120 sled (at 30 deg), chops it in half
                 //   3 both 1 and 2
 print_layout=true;
+debug = true;  // assembly debug aids (ring gear teeth tube)
 
 
 // base view_mask:
@@ -331,7 +341,7 @@ sled_view = sled_collision_view;   //[];
 
 // full assembly
 if(part == 0) {
-    base_assembly(expand=expand, slice_mode=slice_mode, view_mask=view, sled_view_mask=sled_view );
+    base_assembly(expand=expand, slice_mode=slice_mode, view_mask=view, sled_view_mask=sled_view, debug=debug);
 }
 
 // ----------------------------------------------------------------------------------------

@@ -47,7 +47,7 @@ wire_channel = [wire_n*wire_d + 1, wire_d + 1]; // width, depth of the drop chan
 wire_channel_shift = 2; // move the channel off the fairing wall towards the pinion, a conduit fills the gap
 
 
-fairing_t = 1.6;   // wall thickness
+fairing_t = 1.0;   // wall thickness
 fairing_fit = 1.0; // clearance to the ring gear tips
 
 sled_top_h = 4;        // sled_top plate thickness
@@ -56,6 +56,9 @@ top_sled_screw_l = 9; // 6g countersunk, sled_top to upper_sled (9 or 12)
 
 sled_tab_d = 3;    // upper / lower sled join tabs (helpers.scad join_tab_*)
 sled_tab_h = 1.2;
+
+sled_hole_xy = [12.5, 0.3]; // lower / upper sled screw posts: x either side of the pinion, y
+sled_post_d = 6.5;          // upper sled screw post diameter (CLEARANCE A)
 
 // ----------------------------------------------------------------------------------------
 // Geometry
@@ -187,7 +190,20 @@ function sensor_floor_z() = sensor_z() - as5600_pcb.z - sensor_standoff; // pock
 function wire_channel_y() = sled_r - fairing_t/2 - wire_channel.y/2 - wire_channel_shift;
 
 
+// pinion tooth tip radius
+function pinion_tip_r() = outer_radius(mod=gear_mod, teeth=pinion_teeth, profile_shift=pinion_shift);
+
+// CLEARANCE A: screw post edge to [pinion tooth tips, ring tooth tips], in plan
+function clearance_a() =
+    let(post_r = sled_post_d/2)
+    [norm(sled_hole_xy) - post_r - pinion_tip_r(),
+     ring_tip_r() - (norm(sled_hole_xy - [0, pinion_dist()]) + post_r)];
+
+// CLEARANCE B: wire conduit face to pinion tooth tips
+function clearance_b() = wire_channel_y() - wire_channel.y/2 - fairing_t - pinion_tip_r();
+
 // conduit around the channel, from the lower sled up to the plate, joined to the fairing wall behind it
+// (CLEARANCE B)
 module wire_conduit() {
     front_y = wire_channel_y() - wire_channel.y/2 - fairing_t;
     assert(front_y > outer_radius(mod=gear_mod, teeth=pinion_teeth, profile_shift=pinion_shift) + 0.5,
@@ -286,7 +302,7 @@ module fairing() {
     intersection() {
         difference() {
             sled_profile();
-            offset(r=-fairing_t)
+            offset(r=-fairing_t-3)
                 sled_profile();
         }
         back(pinion_dist())
@@ -308,7 +324,8 @@ module at_sled_holes(pionion_r=0) {
     //fwd(5)
     for (side=[-1, 1])
         //fwd(0.5)
-            left(12.4 * side)
+        back(sled_hole_xy.y)
+            left(sled_hole_xy.x * side)
                 children();
 }
 
@@ -345,20 +362,26 @@ module sensor_pocket_negative() {
 }
 
 module upper_sled(pionion_r=0) {
+    echo(clearance_a_post_to_pinion=clearance_a()[0], clearance_a_post_to_ring=clearance_a()[1],
+         clearance_b_conduit_to_pinion=clearance_b());
+
     difference() {
         union() {
             sled_shape(upper_sled_h, greater_d=collar_od()-6, pinion_hole_d=10);
+            
+            // two shafts for the screy holes  (CLEARANCE A)
             at_sled_holes()
-                cyl(d=6.5, h=upper_sled_z, $fn=32*LOD, anchor=TOP);
+                cyl(d=sled_post_d, h=upper_sled_z, $fn=64*LOD, anchor=TOP);
+            
             down(upper_sled_z) {
                 fairing();
-                wire_conduit();
+                wire_conduit(); // (CLEARANCE B)
                 sensor_stilts();
                 sensor_guard();
 
                 // pads thickening the fairing round the tab pits
                 at_sled_tabs()
-                    cyl(d=6, h=upper_sled_z, anchor=BOTTOM, $fn=32*LOD);
+                    cyl(d=6.0, h=upper_sled_z, anchor=BOTTOM, $fn=32*LOD);
 
                 // join tabs, pointing down into the lower sled
                 at_sled_tabs()
@@ -710,7 +733,16 @@ module at_bearing_nut() {
 
 // view_mask (see apply_view()): 0 motor, 1 pinion, 2 magnet, 3 lower sled, 4 sled screws, 5 upper sled,
 //   6 sled top, 7 sled top screws, 8 alignment pins, 9 sensor, 10 bearing screw and nut, 11 wire harness
-module sled_assembly(pionion_r=0, expand = 0, view_mask=[]) {
+// debug: # tube over the pinion's teeth (root to tip, gear height), to check clearance
+module sled_assembly(pionion_r=0, expand = 0, view_mask=[], debug=false) {
+    if (debug) {
+        up(32 * expand)
+            up(gear_z_offset)
+                #tube(ir=_root_radius(mod=gear_mod, teeth=pinion_teeth, profile_shift=pinion_shift), // BOSL2 internal
+                      or=outer_radius(mod=gear_mod, teeth=pinion_teeth, profile_shift=pinion_shift),
+                      h=collar_gear_h, anchor=BOTTOM, $fn=128*LOD);
+    }
+
     apply_view(view_mask[0])
         up(motor_z())
             n20_motor();
